@@ -49,7 +49,7 @@
 #                                         gene_id, SYMBOL, ENTREZID, GENENAME)
 #
 # Usage:
-#   Rscript RNAseq_Script5_ER_UPR_leave_one_out_overlap.R
+# Rscript "ER stress/09_er_upr_leave_one_out_analysis.R"
 # ============================================================
 
 suppressPackageStartupMessages({
