@@ -28,9 +28,9 @@
 #   fold over expected 3.83, hypergeometric P = 1.01e-06.
 #
 # Gene universe:
-#   To match the primary DESeq2 analysis, the count matrix is restricted
-#   to the gene set of the main DESeq2 result table before refitting, so
-#   every leave-one-out iteration shares the same gene universe.
+# Restrict the count matrix to genes included in the primary DESeq2 analysis.
+# In each leave-one-out iteration, the gene universe comprises all genes
+# tested after applying the same low-count filter.
 #
 # ER/UPR gene set:
 #   A fixed, manually curated ER stress / UPR / ERAD / ER-Golgi-transport gene set is defined in this script
