@@ -29,7 +29,7 @@
 #     conditioned-medium volume used to calculate total secreted GDF15.
 #
 # Usage:
-#   python3 ELISA_Script1_GDF15_4PL_quantification.py
+#   python 05_gdf15_elisa.py
 #
 # Tested with: Python 3.10.12, pandas 2.2.3, numpy 2.2.5, scipy 1.15.3
 # ============================================================
