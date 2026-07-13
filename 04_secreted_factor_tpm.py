@@ -28,7 +28,7 @@
 #       TAD ("DM") lines are listed in DM_CASES below.
 #
 # Usage:
-#   python 04_secreted_factor_tpm.py
+#    python3 04_secreted_factor_tpm.py
 #
 # Tested with: Python 3.10.12, pandas 2.2.3, numpy 2.2.5, scipy 1.15.3
 # ============================================================
