@@ -1,0 +1,166 @@
+# Data Dictionary
+
+This document defines the input files and columns required by the analysis
+scripts accompanying the manuscript on tumor-associated diabetes (TAD) and the
+T-cell-hypoinfiltrated phenotype in resected pancreatic ductal adenocarcinoma
+(PDAC).
+
+**Group labels used throughout the code.** In the RNA-seq and organoid scripts,
+`DM` / `DM_group == 1` denotes **TAD** (tumor-associated diabetes) and
+`Normal` / `DM_group == 0` denotes **non-TAD**. In the clinical script, the
+`TAD` variable is coded `0 = non-TAD`, `1 = TAD`.
+
+**Data availability.** The underlying patient-level clinical data and
+patient-derived organoid sequencing data are subject to ethical restrictions and
+are not distributed in this repository. Availability follows the Data
+Availability statement of the manuscript. The files below describe the expected
+structure so that users with appropriate access can reproduce the analyses.
+
+---
+
+## 1. `clinical_data.xlsx` — clinical cohort (n = 162)
+
+Used by: **Clinical Script 1** (survival analysis: KM, log-rank, Cox; OS and CSS).
+One row per patient. Binary covariates are coded 0/1.
+
+| Column | Type | Coding / units | Definition |
+|---|---|---|---|
+| `os_time` | numeric | months | Overall survival time, measured from date of surgery |
+| `os_event` | integer 0/1 | 1 = death (any cause), 0 = censored | Overall survival event indicator |
+| `css_event` | integer 0/1 | 1 = PDAC (cancer-specific) death, 0 = censored (includes non-PDAC death) | Cancer-specific survival event indicator |
+| `TAD` | integer 0/1 | 0 = non-TAD, 1 = TAD | Tumor-associated diabetes (new-onset or worsening diabetes within 3 years before PDAC diagnosis) |
+| `stage` | integer 0/1 | 0 = ≤ IIA, 1 = ≥ IIB | Pathologic stage group (UICC/AJCC) |
+| `margin` | integer 0/1 | 0 = R0, 1 = R1 | Resection margin status |
+| `NLR` | integer 0/1 | 0 = < 2.1, 1 = ≥ 2.1 | Neutrophil-to-lymphocyte ratio, dichotomized |
+| `CA199` | integer 0/1 | 0 = ≤ 37, 1 = > 37 U/mL | Serum CA19-9, dichotomized |
+| `CA199_raw` | numeric | U/mL (> 0 for all cases) | Serum CA19-9, raw value (used for the log2-continuous sensitivity analysis) |
+| `adj_chemo` | integer 0/1 | 0 = No, 1 = Yes | Adjuvant chemotherapy (postoperative; sensitivity models only) |
+| `neoadj` | integer 0/1 | 0 = No, 1 = Yes | Neoadjuvant chemotherapy (used to define the neoadjuvant-excluded sensitivity cohort) |
+
+Notes:
+- The stage ≥ IIB subgroup (`stage == 1`) has n = 119.
+- The neoadjuvant-excluded cohort (`neoadj == 0`) has n = 144.
+- `CA199_raw` must have strictly positive values; `log2(CA199_raw)` is used
+  directly, with no offset.
+
+---
+
+## 2. `count_matrix.xlsx` — organoid RNA-seq raw counts (36 lines)
+
+Used by: **RNAseq Script 1** (DESeq2 differential expression).
+
+| Column | Type | Definition |
+|---|---|---|
+| (first column) | string | Gene identifier (row names); e.g. Ensembl gene ID or symbol |
+| one column per organoid line | integer | Raw read counts; column names begin with the organoid ID (e.g. `KYK019...`) |
+
+Notes:
+- Sample (TAD/non-TAD) assignment is derived from the leading organoid ID in
+  each column name via the `DM_CASES` list in the script.
+- The six TAD lines are `KYK019, KYK020, KYK067, KYK084, KYK090, KYK093`;
+  the remaining 30 lines are non-TAD.
+
+---
+
+## 3. `organoid_expression_TPM.xlsx` — organoid TPM matrix
+
+Used by: **RNAseq Script 3** (TPM-based secreted-factor comparison) and
+**ELISA Script 2** (protein–mRNA correlation).
+
+| Sheet | Column | Type | Definition |
+|---|---|---|---|
+| `TPM` | `gene_symbol` | string | Gene symbol |
+| `TPM` | one `*_TPM` column per organoid line | numeric | Transcripts per million; column names end in `_TPM` and begin with the organoid ID (e.g. `KYK019_..._TPM`) |
+
+---
+
+## 4. `organoid_driver_alterations.xlsx` — driver-gene alteration calls
+
+Used by: **WGS Script 1** (driver-gene alteration comparison, Fisher's exact test).
+One row per organoid line.
+
+| Column | Type | Coding | Definition |
+|---|---|---|---|
+| `SampleID` | string | e.g. `KYK019` | Organoid identifier |
+| `KRAS_any` | integer 0/1 | 1 = altered | Integrated KRAS alteration call (mutation) |
+| `TP53_any` | integer 0/1 | 1 = altered | Integrated TP53 call (mutation, heterozygous deletion, or copy-neutral LOH/UPD) |
+| `CDKN2A_any` | integer 0/1 | 1 = altered | Integrated CDKN2A call (mutation or homozygous deletion) |
+| `SMAD4_any` | integer 0/1 | 1 = altered | Integrated SMAD4 call (mutation, homozygous deletion, or heterozygous deletion) |
+
+Notes:
+- Each `*_any` column integrates mutation and the gene-specific copy-number
+  events listed above, as described in the Methods.
+
+---
+
+## 5. Leave-one-out over-representation inputs (RNAseq Script 5)
+
+Used by: **RNAseq Script 5** (ER stress/UPR leave-one-out overlap sensitivity
+analysis). The curated ER stress/UPR gene set is embedded in the script.
+
+### 5a. `count_analysis.csv`
+| Column | Type | Definition |
+|---|---|---|
+| `gene_id` | string | Gene identifier |
+| one column per organoid line | integer | Raw read counts; column names begin with the organoid ID |
+
+### 5b. `organoid_DM_status.xlsx`
+| Column | Type | Coding | Definition |
+|---|---|---|---|
+| `case` | string | e.g. `KYK019` | Organoid identifier |
+| `DM_group` | integer 0/1 | 1 = TAD, 0 = non-TAD | Diabetes group |
+
+### 5c. `DESeq2_all_results.xlsx`
+Main DESeq2 result table; defines the shared gene universe and annotation.
+| Column | Type | Definition |
+|---|---|---|
+| `gene_id` | string | Gene identifier (matches `count_analysis.csv`) |
+| `SYMBOL` | string | Gene symbol |
+| `ENTREZID` | string/integer | Entrez gene ID |
+| `GENENAME` | string | Gene description |
+
+---
+
+## 6. `GDF15_ELISA_raw.xlsx` — GDF15 ELISA raw data
+
+Used by: **ELISA Script 1** (4-parameter logistic standard-curve fitting and
+DNA-normalized quantification).
+
+| Sheet | Column | Type | Units | Definition |
+|---|---|---|---|---|
+| `standard_curve` | `concentration_pg_ml` | numeric | pg/mL | Standard concentration (0 = blank) |
+| `standard_curve` | `A450` | numeric | OD | Absorbance at 450 nm |
+| `standard_curve` | `A570` | numeric | OD | Reference absorbance at 570 nm |
+| `samples` | `Sample` | string | — | Organoid/sample identifier |
+| `samples` | `A450` | numeric | OD | Absorbance at 450 nm |
+| `samples` | `A570` | numeric | OD | Reference absorbance at 570 nm |
+| `samples` | `dilution_factor` | numeric | — | Sample dilution factor |
+| `samples` | `conditioned_medium_volume_ml` | numeric | mL | Total recovered conditioned-medium volume (for total secreted GDF15) |
+| `dna` | `Sample` | string | — | Organoid/sample identifier |
+| `dna` | `DNA_ug` | numeric | µg | Organoid DNA content (normalization denominator) |
+
+Notes:
+- OD is corrected as `A450 − A570`; the mean zero-standard OD is used as blank
+  and zero-standard wells are excluded from the 4PL fit.
+- Output: GDF15 concentration (pg/mL) and DNA-normalized secretion (pg/µg DNA).
+
+---
+
+## 7. TCGA-PAAD inputs (public)
+
+Used by: **TCGA-PAAD analysis** (GDF15, cytotoxic immune genes, CYT, DDIT3, survival).
+Source: UCSC Xena GDC Hub (accessed 2026-04-28). These are public files.
+
+| File | Definition |
+|---|---|
+| `TCGA-PAAD.star_fpkm-uq.tsv.gz` | STAR-aligned FPKM-UQ expression matrix (Ensembl IDs × samples) |
+| `TCGA-PAAD.survival.tsv.gz` | Survival table (`sample`, `OS`, `OS.time`) |
+| `gencode.v36.annotation.gtf.gene.probemap` | Ensembl-ID-to-gene-symbol probe map (`id`, `gene`) |
+
+Notes:
+- Primary tumor samples are identified by the `-01A` barcode suffix.
+- Expression values are analyzed as `log2(FPKM-UQ + 1)`.
+- The analytic cohort is n = 177 primary tumors (93 OS events); GDF15 is
+  dichotomized at the cohort median (High n = 89, Low n = 88).
+- Cytolytic activity (CYT) is the arithmetic mean of log2-transformed GZMA and
+  PRF1 expression, adapted from Rooney et al.
