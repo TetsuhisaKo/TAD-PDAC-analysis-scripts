@@ -49,8 +49,8 @@ Genomic Data Commons PanCanAtlas release
 | `02_deseq2_differential_expression.R` | Organoid RNA-seq differential expression and PCA | Fig. 3a,d,e; Supplementary Fig. S4; Supplementary Table S7 |
 | `03_preranked_gsea.R` | Pre-ranked Hallmark and Reactome GSEA | Fig. 3b,c; Supplementary Table S6 |
 | `04_secreted_factor_tpm.py` | TPM-based sensitivity analysis of selected genes | Supplementary Table S7 |
-| `07_tcga_paad_analysis.R` | TCGA-PAAD GDF15, immune-gene, CYT, DDIT3, purity-adjusted and survival analyses | Fig. 4c–e; Supplementary Table S8; Supplementary Fig. S5 |
-| `08_driver_gene_wgs_analysis.R` | Major PDAC driver-gene alteration comparison in organoids | Supplementary Fig. S3 |
+| `05_tcga_paad_analysis.R` | TCGA-PAAD GDF15, immune-gene, CYT, DDIT3, purity-adjusted and survival analyses | Fig. 4c–e; Supplementary Table S8; Supplementary Fig. S5 |
+| `06_driver_gene_wgs_analysis.R` | Major PDAC driver-gene alteration comparison in organoids | Supplementary Fig. S3 |
 
 ---
 
