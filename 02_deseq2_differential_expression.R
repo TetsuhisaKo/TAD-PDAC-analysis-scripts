@@ -4,24 +4,28 @@
 # Patient-derived PDAC organoids:
 # TAD (n=6) vs non-TAD (n=30)
 #
-# Current manuscript:
-#   Primary DESeq2 design: ~ DM_group
-#   Reference: non-TAD
-#   Row-summed raw count <=10 excluded
+# Computes the statistics underlying:
+#   Fig. 3a                    differential expression
+#   Fig. 3d/e                  selected DESeq2 estimates
+#   Supplementary Fig. S4      PCA coordinates/variance
+#   Supplementary Table S7A    platform sensitivity
+#
+# Plotting code is intentionally not included.
+#
+# Primary:
+#   design = ~ DM_group
+#   reference = non-TAD
+#   genes with row-summed raw count <=10 excluded
 #   apeglm-shrunken log2FC
-#   Differential expression: BH-adjusted P<0.05
-#   No fold-change threshold
-#   PCA: variance-stabilized counts
+#   BH-adjusted P<0.05, no fold-change threshold
 #
-# Sensitivity:
-#   ~ platform + DM_group
-#   KYK015 and KYK019 = MiSeq
-#   all remaining lines = HiSeq 2500
+# PCA:
+#   variance-stabilized counts
+#   explicitly uses the 500 most variable genes
 #
-# Maps to:
-#   Fig. 3a
-#   Supplementary Fig. S4
-#   Supplementary Table S7A
+# Platform sensitivity:
+#   design = ~ platform + DM_group
+#   KYK015/KYK019 = MiSeq; all others = HiSeq2500
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -41,6 +45,10 @@ stopifnot(file.exists(count_file))
 counts_df <- read_excel(count_file)
 gene_col <- names(counts_df)[1]
 
+if (anyDuplicated(counts_df[[gene_col]]) > 0) {
+  stop("The first column of count_matrix.xlsx must contain unique gene symbols.")
+}
+
 counts <- counts_df %>%
   column_to_rownames(var = gene_col)
 
@@ -50,7 +58,6 @@ storage.mode(counts) <- "numeric"
 if (any(is.na(counts))) stop("Count matrix contains NA values.")
 if (any(counts < 0)) stop("Count matrix contains negative values.")
 
-# DESeq2 requires integer counts.
 if (any(abs(counts - round(counts)) > 1e-8)) {
   warning("Non-integer values detected; rounding to nearest integer for DESeq2.")
 }
@@ -86,11 +93,8 @@ write.csv(
   row.names = FALSE
 )
 
-# ------------------------------------------------------------
-# Helper: preserve unshrunken P/padj but replace log2FC with
-# apeglm-shrunken log2FC.
-# ------------------------------------------------------------
-
+# Preserve unshrunken nominal P/padj but use apeglm-shrunken
+# log2FC for effect sizes and downstream GSEA ranking.
 build_result_table <- function(dds, coef_name) {
   raw_res <- results(dds, name = coef_name, independentFiltering = TRUE)
   shr_res <- lfcShrink(dds, coef = coef_name, type = "apeglm")
@@ -134,13 +138,13 @@ dds <- DESeq(dds)
 
 coef_primary <- "DM_group_TAD_vs_non.TAD"
 if (!(coef_primary %in% resultsNames(dds))) {
-  # DESeq2 can sanitize the hyphen differently across versions.
   coef_primary <- grep(
     "^DM_group_.*TAD.*vs.*non",
     resultsNames(dds),
     value = TRUE
   )[1]
 }
+
 if (is.na(coef_primary) || length(coef_primary) == 0) {
   stop("Could not identify the TAD vs non-TAD coefficient.")
 }
@@ -156,11 +160,7 @@ sig_primary <- res_plottable %>%
 cat("Genes after row-sum >10 filter:", nrow(res_primary), "\n")
 cat("Genes with non-missing padj:", nrow(res_plottable), "\n")
 cat("Significant DEGs (BH-adjusted P<0.05):", nrow(sig_primary), "\n")
-
-# Current dataset snapshot:
-#   genes with non-missing padj: approximately 16,272
-#   significant DEGs: 307
-# If package/input versions differ, inspect before forcing these counts.
+cat("Current snapshot: ~16,272 plottable genes; 307 DEGs.\n")
 
 write.xlsx(
   res_primary,
@@ -181,17 +181,27 @@ write.xlsx(
 )
 
 # ------------------------------------------------------------
-# Variance-stabilized PCA
-# Supplementary Fig. S4
+# PCA: Supplementary Fig. S4
+# Make plotPCA's default ntop=500 explicit.
 # ------------------------------------------------------------
 
+PCA_NTOP <- 500L
+
 vsd <- vst(dds, blind = TRUE)
-pca <- plotPCA(vsd, intgroup = "DM_group", returnData = TRUE)
+
+pca <- plotPCA(
+  vsd,
+  intgroup = "DM_group",
+  ntop = PCA_NTOP,
+  returnData = TRUE
+)
+
 percent_var <- round(100 * attr(pca, "percentVar"), 1)
 
 pca_out <- pca %>%
   rownames_to_column("Sample") %>%
   mutate(
+    PCA_ntop = PCA_NTOP,
     PC1_percent = percent_var[1],
     PC2_percent = percent_var[2]
   )
@@ -203,13 +213,14 @@ write.csv(
 )
 
 cat(
-  "PCA variance: PC1 =", percent_var[1],
-  "%; PC2 =", percent_var[2], "%\n"
+  "PCA based on", PCA_NTOP, "most variable genes:",
+  "PC1 =", percent_var[1], "%;",
+  "PC2 =", percent_var[2], "%\n"
 )
-# Current figure: PC1 11.2%, PC2 10.5%.
+cat("Current figure: PC1 11.2%; PC2 10.5%.\n")
 
 # ------------------------------------------------------------
-# Platform-adjusted sensitivity model
+# Platform-adjusted sensitivity
 # ------------------------------------------------------------
 
 dds_platform <- DESeqDataSetFromMatrix(
@@ -229,6 +240,7 @@ if (!(coef_platform %in% resultsNames(dds_platform))) {
     value = TRUE
   )[1]
 }
+
 if (is.na(coef_platform) || length(coef_platform) == 0) {
   stop("Could not identify the platform-adjusted TAD coefficient.")
 }
@@ -243,7 +255,6 @@ write.xlsx(
 
 # ------------------------------------------------------------
 # Supplementary Table S7A
-# Current selected genes
 # ------------------------------------------------------------
 
 selected_s7a <- c("GDF15", "DDIT3", "MARS1", "XBP1")
@@ -264,9 +275,7 @@ s7a <- res_primary %>%
       ),
     by = "SYMBOL"
   ) %>%
-  mutate(
-    SYMBOL = factor(SYMBOL, levels = selected_s7a)
-  ) %>%
+  mutate(SYMBOL = factor(SYMBOL, levels = selected_s7a)) %>%
   arrange(SYMBOL) %>%
   mutate(SYMBOL = as.character(SYMBOL))
 
@@ -276,15 +285,18 @@ write.csv(
   row.names = FALSE
 )
 
-cat("\nSupplementary Table S7A selected genes:\n")
+cat("\nSupplementary Table S7A:\n")
 print(s7a)
 
-# Expected current values:
-# GDF15 primary log2FC 2.30, adjusted P 0.044;
-#       platform-adjusted log2FC 2.46, adjusted P 0.025
-# DDIT3 primary 3.61, 0.0002; platform 3.57, 0.0003
-# MARS1 primary 2.16, 0.0002; platform 2.15, 0.0002
-# XBP1  primary 0.95, 0.044;  platform 0.84, 0.062
+# Current manuscript checks:
+# GDF15 primary log2FC ~2.30, padj ~0.044;
+#       platform-adjusted log2FC ~2.46, padj ~0.025
+# DDIT3 primary ~3.61, padj ~0.0002;
+#       platform-adjusted ~3.57, padj ~0.0003
+# MARS1 primary ~2.16, padj ~0.0002;
+#       platform-adjusted ~2.15, padj ~0.0002
+# XBP1  primary ~0.95, padj ~0.044;
+#       platform-adjusted ~0.84, padj ~0.062
 
 sink(file.path(out_dir, "sessionInfo_DESeq2.txt"))
 sessionInfo()
