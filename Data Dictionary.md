@@ -1,5 +1,4 @@
 # Data Dictionary
-# Data Dictionary
 
 This document defines the input files, variables, generated intermediate files,
 and public datasets required by the analysis scripts accompanying the manuscript:
