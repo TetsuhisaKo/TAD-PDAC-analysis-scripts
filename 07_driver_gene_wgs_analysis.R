@@ -1,27 +1,23 @@
 # ============================================================
-# 08_driver_gene_wgs_analysis.R
+# 07_driver_gene_wgs_analysis.R
 #
 # Major PDAC driver-gene alterations in patient-derived
 # organoids according to TAD status.
 #
-# Current manuscript:
-#   WGS-derived organoid alteration calls are compared using
-#   Fisher's exact test.
+# Computes the statistics underlying Supplementary Fig. S3.
+# Plotting code is intentionally not included.
 #
-# Maps to Supplementary Fig. S3.
+# Fisher exact tests are exploratory and P values are unadjusted.
 #
-# Expected groups:
-#   non-TAD n=30
-#   TAD n=6
+# Expected:
+#   non-TAD n=30; TAD n=6
+#   KRAS    30/30 vs 6/6   (100% vs 100%), P=1.000
+#   TP53    26/30 vs 4/6   (87%  vs 67%),  P=0.256
+#   CDKN2A  23/30 vs 3/6   (77%  vs 50%),  P=0.317
+#   SMAD4   21/30 vs 2/6   (70%  vs 33%),  P=0.161
 #
-# Expected current figure:
-#   KRAS    100% vs 100%, P=1.000
-#   TP53     87% vs  67%, P=0.256
-#   CDKN2A   77% vs  50%, P=0.317
-#   SMAD4    70% vs  33%, P=0.161
-#
-# Input file contains PRE-DERIVED gene-level 0/1 alteration
-# calls from WGS. This script does not process raw WGS data.
+# Input contains pre-derived gene-level 0/1 alteration calls
+# from WGS. This script does not process raw WGS reads.
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -42,6 +38,7 @@ required <- c(
 )
 
 missing <- setdiff(required, names(big4))
+
 if (length(missing) > 0) {
   stop("Missing required column(s): ", paste(missing, collapse = ", "))
 }
@@ -67,6 +64,7 @@ genes <- c("KRAS", "TP53", "CDKN2A", "SMAD4")
 
 results <- bind_rows(
   lapply(genes, function(g) {
+
     col <- paste0(g, "_any")
 
     if (!all(na.omit(big4[[col]]) %in% c(0, 1))) {
@@ -82,25 +80,38 @@ results <- bind_rows(
 
     data.frame(
       Gene = g,
-      Non_TAD_n = sum(big4$DM_group == "non-TAD" & !is.na(big4[[col]])),
-      TAD_n = sum(big4$DM_group == "TAD" & !is.na(big4[[col]])),
+
+      Non_TAD_n = sum(
+        big4$DM_group == "non-TAD" & !is.na(big4[[col]])
+      ),
+
+      TAD_n = sum(
+        big4$DM_group == "TAD" & !is.na(big4[[col]])
+      ),
+
       Non_TAD_altered_n = sum(
         big4$DM_group == "non-TAD" & big4[[col]] == 1,
         na.rm = TRUE
       ),
+
       TAD_altered_n = sum(
         big4$DM_group == "TAD" & big4[[col]] == 1,
         na.rm = TRUE
       ),
+
       Non_TAD_percent = mean(
         big4[[col]][big4$DM_group == "non-TAD"],
         na.rm = TRUE
       ) * 100,
+
       TAD_percent = mean(
         big4[[col]][big4$DM_group == "TAD"],
         na.rm = TRUE
       ) * 100,
-      P_value = ft$p.value
+
+      P_value = ft$p.value,
+      Multiple_testing_adjustment = "None; exploratory",
+      stringsAsFactors = FALSE
     )
   })
 )
@@ -116,4 +127,3 @@ write.csv(
 sink(file.path(out_dir, "sessionInfo_driver_genes.txt"))
 sessionInfo()
 sink()
-sessionInfo()
