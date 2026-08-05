@@ -1,21 +1,24 @@
-# ============================================================
 # 03_preranked_gsea.R
 #
 # Pre-ranked GSEA for patient-derived PDAC organoids.
 #
-# Current manuscript:
-#   rank = sign(apeglm-shrunken log2FC) * -log10(nominal P)
-#   collections = MSigDB Hallmark + Reactome
-#   gene-set size = 15-500
-#   random seed = 42
-#   prespecified GSEA threshold = q < 0.25
+# Computes the statistics underlying:
+#   Fig. 3b                    selected Hallmark signals
+#   Fig. 3c                    selected Reactome signals
+#   Supplementary Table S6
 #
-# Maps to:
-#   Fig. 3b: selected Hallmark signals
-#   Fig. 3c: selected Reactome signals
-#   Supplementary Table S6:
-#     A. Hallmark gene sets with nominal P <0.05
-#     B. Reactome pathways with q <0.25
+# Plotting code is intentionally not included.
+#
+# Ranking:
+#   sign(apeglm-shrunken log2FC) * -log10(nominal P)
+#
+# Collections: MSigDB Hallmark and Reactome
+# Gene-set size: 15-500
+# Random seed: 42
+# Prespecified significance threshold: FDR q < 0.25
+#
+# Ties in ranking score are resolved deterministically by
+# log2FC and then gene symbol. No later sort() is applied.
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -34,29 +37,41 @@ stopifnot(file.exists(in_file))
 deg <- read_excel(in_file) %>%
   filter(
     !is.na(SYMBOL),
+    SYMBOL != "",
     !is.na(log2FoldChange),
     !is.na(pvalue)
   ) %>%
   mutate(
+    SYMBOL = as.character(SYMBOL),
     rank_score = sign(log2FoldChange) * (-log10(pmax(pvalue, 1e-300)))
-  ) %>%
-  arrange(desc(rank_score), desc(log2FoldChange))
+  )
 
-# clusterProfiler requires unique gene names.
-# If duplicate symbols exist, retain the row with the largest
-# absolute ranking score.
+# Unique gene symbols are required. If duplicates exist, retain
+# the row with the greatest absolute rank score; tie-breaks are
+# explicitly deterministic.
 deg <- deg %>%
-  group_by(SYMBOL) %>%
-  slice_max(order_by = abs(rank_score), n = 1, with_ties = FALSE) %>%
-  ungroup() %>%
-  arrange(desc(rank_score), desc(log2FoldChange))
+  arrange(
+    SYMBOL,
+    desc(abs(rank_score)),
+    desc(log2FoldChange),
+    pvalue
+  ) %>%
+  distinct(SYMBOL, .keep_all = TRUE)
 
+ord <- order(
+  -deg$rank_score,
+  -deg$log2FoldChange,
+  deg$SYMBOL,
+  method = "radix"
+)
+
+deg <- deg[ord, , drop = FALSE]
 gene_list <- setNames(deg$rank_score, deg$SYMBOL)
-gene_list <- sort(gene_list, decreasing = TRUE)
 
-get_msig <- function(collection_name) {
-  # msigdbr changed argument names across releases.
-  # Try the current API first, then fall back to the older API.
+stopifnot(!anyDuplicated(names(gene_list)))
+stopifnot(all(diff(gene_list) <= 0))
+
+get_msig_raw <- function(collection_name) {
   if (collection_name == "H") {
     x <- tryCatch(
       msigdbr(species = "Homo sapiens", collection = "H"),
@@ -82,17 +97,65 @@ get_msig <- function(collection_name) {
       )
     }
   } else {
-    stop("Unknown collection.")
+    stop("Unknown collection: ", collection_name)
   }
 
-  x %>% select(gs_name, gene_symbol) %>% distinct()
+  x
 }
 
-hallmark_sets <- get_msig("H")
-reactome_sets <- get_msig("REACTOME")
+hallmark_raw <- get_msig_raw("H")
+reactome_raw <- get_msig_raw("REACTOME")
+
+hallmark_sets <- hallmark_raw %>%
+  select(gs_name, gene_symbol) %>%
+  distinct()
+
+reactome_sets <- reactome_raw %>%
+  select(gs_name, gene_symbol) %>%
+  distinct()
+
+db_version_value <- function(x) {
+  if ("db_version" %in% names(x)) {
+    vals <- sort(unique(na.omit(as.character(x$db_version))))
+    if (length(vals) == 0) return("not_available")
+    return(paste(vals, collapse = ";"))
+  }
+  "not_exposed_by_installed_msigdbr"
+}
+
+version_manifest <- data.frame(
+  Item = c(
+    "clusterProfiler_version",
+    "msigdbr_version",
+    "Hallmark_MSigDB_db_version",
+    "Reactome_MSigDB_db_version",
+    "ranking_metric",
+    "min_gene_set_size",
+    "max_gene_set_size",
+    "seed"
+  ),
+  Value = c(
+    as.character(packageVersion("clusterProfiler")),
+    as.character(packageVersion("msigdbr")),
+    db_version_value(hallmark_raw),
+    db_version_value(reactome_raw),
+    "sign(shrunken log2FC) * -log10(nominal P)",
+    "15",
+    "500",
+    "42"
+  ),
+  stringsAsFactors = FALSE
+)
+
+write.csv(
+  version_manifest,
+  file.path(out_dir, "GSEA_version_and_database_manifest.csv"),
+  row.names = FALSE
+)
 
 run_gsea <- function(term2gene) {
   set.seed(42)
+
   GSEA(
     geneList = gene_list,
     TERM2GENE = term2gene,
@@ -123,14 +186,12 @@ write.xlsx(
   rowNames = FALSE
 )
 
-# Supplementary Table S6A:
-# ALL Hallmark gene sets with nominal P<0.05.
+# Supplementary Table S6A: all Hallmark gene sets with nominal P<0.05.
 s6a <- hallmark_full %>%
   filter(pvalue < 0.05) %>%
-  arrange(pvalue)
+  arrange(pvalue, p.adjust)
 
-# Supplementary Table S6B:
-# ALL Reactome pathways meeting the prespecified q<0.25 threshold.
+# Supplementary Table S6B: all Reactome pathways with q<0.25.
 s6b <- reactome_full %>%
   filter(p.adjust < 0.25) %>%
   arrange(p.adjust, pvalue)
@@ -147,7 +208,6 @@ write.xlsx(
   rowNames = FALSE
 )
 
-# Current Fig. 3b highlights these four Hallmark sets.
 fig3b_ids <- c(
   "HALLMARK_PI3K_AKT_MTOR_SIGNALING",
   "HALLMARK_PROTEIN_SECRETION",
@@ -160,33 +220,35 @@ fig3b <- hallmark_full %>%
 
 write.csv(
   fig3b,
-  file.path(out_dir, "Fig3b_selected_Hallmark_results.csv"),
+  file.path(out_dir, "Fig3b_selected_Hallmark_statistics.csv"),
   row.names = FALSE
 )
 
+cat("\nGSEA version/database manifest:\n")
+print(version_manifest)
+
 cat("\nSupplementary Table S6A: Hallmark nominal P<0.05\n")
-print(s6a[, intersect(
-  c("ID", "Description", "setSize", "NES", "pvalue", "p.adjust"),
-  names(s6a)
-)])
+print(
+  s6a[, intersect(
+    c("ID", "Description", "setSize", "NES", "pvalue", "p.adjust"),
+    names(s6a)
+  )]
+)
 
 cat("\nSupplementary Table S6B: Reactome q<0.25\n")
-print(s6b[, intersect(
-  c("ID", "Description", "setSize", "NES", "pvalue", "p.adjust"),
-  names(s6b)
-)])
+print(
+  s6b[, intersect(
+    c("ID", "Description", "setSize", "NES", "pvalue", "p.adjust"),
+    names(s6b)
+  )]
+)
 
-# Current manuscript-table snapshot includes:
-# Hallmark:
-#   PI3K-AKT-mTOR signaling  NES ~1.52, P~0.010, q~0.24
-#   Protein secretion       NES ~1.41, P~0.034, q~0.40 (nominal only)
-#   Interferon-alpha        NES ~1.39, P~0.034, q~0.40 (nominal only)
-#   MYC targets V2          NES ~-1.67, P~0.002, q~0.11
-#
-# Reactome S6B includes all q<0.25 pathways, including
-# N-linked glycosylation, ER/Golgi transport and IRE1alpha
-# chaperone-related signals.
+# Current manuscript snapshot:
+# PI3K-AKT-mTOR signaling: NES ~1.52, P~0.010, q~0.24
+# Protein secretion:       NES ~1.41, P~0.034, q~0.40
+# Interferon-alpha:        NES ~1.39, P~0.034, q~0.40
+# MYC targets V2:          NES ~-1.67, P~0.002, q~0.11
 
 sink(file.path(out_dir, "sessionInfo_GSEA.txt"))
 sessionInfo()
-sink()        
+sink()
