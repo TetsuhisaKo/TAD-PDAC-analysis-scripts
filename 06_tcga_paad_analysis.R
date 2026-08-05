@@ -1,48 +1,45 @@
 # ============================================================
-# 05_tcga_gdf15_analysis.R
+# 06_tcga_paad_analysis.R
 #
-# Current TCGA-PAAD analyses for the revised manuscript.
+# Current TCGA-PAAD GDF15 analyses.
 #
-# Maps to:
-#   Fig. 4c:
-#     GDF15-high vs low: CD8A, GZMA, GZMB, PRF1
-#   Fig. 4d:
-#     continuous GDF15 vs CD8A
-#   Fig. 4e:
-#     continuous GDF15 vs DDIT3/CHOP
-#   Supplementary Table S8:
-#     A. unadjusted continuous Spearman correlations
-#     B. ABSOLUTE-purity-adjusted partial Spearman correlations
-#     C. six GDF15 median-split comparisons
-#     D. infiltrating duct carcinoma, NOS sensitivity analysis
-#   Supplementary Fig. S5:
-#     GDF15-high vs low overall survival
+# Computes the statistics underlying:
+#   Fig. 4c                    GDF15 high/low vs CD8A/GZMA/GZMB/PRF1
+#   Fig. 4d                    continuous GDF15 vs CD8A
+#   Fig. 4e                    continuous GDF15 vs DDIT3
+#   Supplementary Table S8A-D
+#   Supplementary Fig. S5      GDF15 high/low overall survival
 #
-# Cohorts:
-#   expression n=163:
-#     143 Infiltrating duct carcinoma, NOS
-#      20 Adenocarcinoma, NOS
-#   OS-evaluable n=162:
-#      81 GDF15-low / 81 GDF15-high
-#   ABSOLUTE purity-evaluable n=143
-#   duct-carcinoma-only n=143; purity-evaluable n=123
+# Plotting code is intentionally not included.
 #
-# Multiple testing:
-#   BH across SIX median-split comparisons:
-#     CD8A, GZMA, GZMB, PRF1, CYT, DDIT3
-#   BH separately across SIX purity-adjusted partial correlations.
-#   Duct-only purity-adjusted analyses form another separate family of six.
+# Expression cohort:
+#   n=163 primary tumors
+#   143 infiltrating duct carcinoma, NOS
+#    20 adenocarcinoma, NOS
 #
-# IMPORTANT EXPRESSION-SCALE NOTE:
-# The UCSC Xena matrix used here contains the log2-transformed
-# FPKM-UQ values used in the manuscript. Values are used directly.
-# DO NOT apply another log2(x+1) transformation.
+# GDF15 split:
+#   expression >= median -> High
+#   n=163: Low 81 / High 82
+#   OS n=162: Low 81 / High 81
 #
-# Public sources:
+# ABSOLUTE purity:
+#   n=143
+#   duct-only n=143; purity n=123
+#
+# BH families:
+#   six median-split comparisons
+#   six purity-adjusted partial correlations
+#   six duct-only purity-adjusted partial correlations
+#
+# IMPORTANT:
+# The final UCSC Xena matrix already contains the log2-transformed
+# FPKM-UQ values used in the manuscript. Use values directly.
+# DO NOT apply another log2(x+1) transform.
+#
+# Sources:
 #   UCSC Xena GDC Hub, accessed 2026-04-28
-#   PanCanAtlas ABSOLUTE file, accessed 2026-07-31
-#   GDC UUID:
-#   4f277128-f793-4354-a13d-30cc7fe9f6b5
+#   PanCanAtlas ABSOLUTE, accessed 2026-07-31
+#   GDC UUID 4f277128-f793-4354-a13d-30cc7fe9f6b5
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -69,12 +66,13 @@ input_files <- c(
 )
 
 missing_files <- input_files[!file.exists(input_files)]
+
 if (length(missing_files) > 0) {
   stop("Missing input file(s): ", paste(missing_files, collapse = ", "))
 }
 
 # ------------------------------------------------------------
-# Input-file checksums
+# Input-file MD5 manifest
 # ------------------------------------------------------------
 
 md5_manifest <- data.frame(
@@ -112,7 +110,6 @@ expr_raw <- expr_raw[
 
 expr_raw$Ensembl_ID_clean <- sub("\\..*$", "", expr_raw[[id_col]])
 
-# If cleaning creates duplicates, keep the first and record the fact.
 dup_n <- sum(duplicated(expr_raw$Ensembl_ID_clean))
 cat("Duplicated cleaned Ensembl IDs removed:", dup_n, "\n")
 
@@ -122,9 +119,18 @@ expr_raw <- expr_raw[
   drop = FALSE
 ]
 
-sample_cols <- setdiff(
+all_sample_cols <- setdiff(
   names(expr_raw),
   c(id_col, "Ensembl_ID_clean")
+)
+
+# Explicit 01A restriction avoids unintentionally including 01B/01C.
+sample_cols <- all_sample_cols[grepl("-01A$", all_sample_cols)]
+
+cat(
+  "Expression columns:",
+  length(all_sample_cols), "total;",
+  length(sample_cols), "with -01A suffix\n"
 )
 
 # ------------------------------------------------------------
@@ -146,6 +152,7 @@ probe <- probe[
   ,
   drop = FALSE
 ]
+
 probe$Ensembl_ID_clean <- sub("\\..*$", "", probe$id)
 
 genes_needed <- c("GDF15", "CD8A", "GZMA", "GZMB", "PRF1", "DDIT3")
@@ -157,12 +164,14 @@ resolve_gene <- function(symbol) {
   if (length(ids) == 0) {
     stop("No expression Ensembl ID found for ", symbol)
   }
+
   if (length(ids) > 1) {
     warning(
       "Multiple Ensembl IDs available for ", symbol,
       "; using ", ids[1]
     )
   }
+
   ids[1]
 }
 
@@ -178,14 +187,21 @@ write.csv(
   row.names = FALSE
 )
 
+cat("\nEnsembl IDs used:\n")
+print(gene_map)
+
 extract_gene <- function(symbol) {
   eid <- gene_map$Ensembl_ID[gene_map$Gene == symbol]
+
   x <- expr_raw[
     expr_raw$Ensembl_ID_clean == eid,
     sample_cols,
     drop = FALSE
   ]
-  if (nrow(x) != 1) stop("Expected one expression row for ", symbol)
+
+  if (nrow(x) != 1) {
+    stop("Expected exactly one expression row for ", symbol)
+  }
 
   data.frame(
     sample = sample_cols,
@@ -228,7 +244,7 @@ pdac_histology <- c(
 
 clin_pdac <- clin %>%
   filter(
-    substr(sample, 14, 15) == "01",
+    grepl("-01A$", sample),
     primary_diagnosis.diagnoses %in% pdac_histology
   ) %>%
   select(sample, primary_diagnosis.diagnoses) %>%
@@ -240,25 +256,31 @@ tcga <- inner_join(expr_df, clin_pdac, by = "sample") %>%
   )
 
 stopifnot(nrow(tcga) == 163)
+
 stopifnot(
-  sum(tcga$primary_diagnosis.diagnoses ==
-        "Infiltrating duct carcinoma, NOS") == 143
+  sum(
+    tcga$primary_diagnosis.diagnoses ==
+      "Infiltrating duct carcinoma, NOS"
+  ) == 143
 )
+
 stopifnot(
-  sum(tcga$primary_diagnosis.diagnoses ==
-        "Adenocarcinoma, NOS") == 20
+  sum(
+    tcga$primary_diagnosis.diagnoses ==
+      "Adenocarcinoma, NOS"
+  ) == 20
 )
 
 cat("\nExpression cohort histology:\n")
 print(table(tcga$primary_diagnosis.diagnoses))
 
-# Expression-scale sanity check against the current analysis snapshot.
 cat("\nCD8A range:", paste(range(tcga$CD8A), collapse = " to "), "\n")
 cat("GDF15 range:", paste(range(tcga$GDF15), collapse = " to "), "\n")
-# Current CD8A range is approximately 0.2028878 to 4.6617610.
+cat("Current CD8A range is approximately 0.203 to 4.662.\n")
 
 # ------------------------------------------------------------
 # GDF15 median split in n=163
+# Median itself belongs to High.
 # ------------------------------------------------------------
 
 gdf15_median <- median(tcga$GDF15, na.rm = TRUE)
@@ -271,22 +293,22 @@ tcga <- tcga %>%
     )
   )
 
-cat("\nGDF15 median:", gdf15_median, "\n")
-print(table(tcga$GDF15_group))
-
 stopifnot(sum(tcga$GDF15_group == "Low") == 81)
 stopifnot(sum(tcga$GDF15_group == "High") == 82)
 
-# Current dataset snapshot: median approximately 4.19693.
+cat("\nGDF15 median:", gdf15_median, "\n")
+print(table(tcga$GDF15_group))
+cat("Current median is approximately 4.19693.\n")
 
 outcomes <- c("CD8A", "GZMA", "GZMB", "PRF1", "CYT", "DDIT3")
 
 # ------------------------------------------------------------
-# S8C: median-split comparisons; BH across six
+# S8C: six median-split comparisons; BH across six
 # ------------------------------------------------------------
 
 median_split_results <- bind_rows(
   lapply(outcomes, function(v) {
+
     x_low <- tcga[[v]][tcga$GDF15_group == "Low"]
     x_high <- tcga[[v]][tcga$GDF15_group == "High"]
 
@@ -304,13 +326,12 @@ median_split_results <- bind_rows(
       High_n = sum(!is.na(x_high)),
       Low_median = median(x_low, na.rm = TRUE),
       High_median = median(x_high, na.rm = TRUE),
-      P_value = wt$p.value
+      P_value = wt$p.value,
+      stringsAsFactors = FALSE
     )
   })
 ) %>%
-  mutate(
-    q_value = p.adjust(P_value, method = "BH")
-  )
+  mutate(q_value = p.adjust(P_value, method = "BH"))
 
 write.csv(
   median_split_results,
@@ -319,22 +340,25 @@ write.csv(
 )
 
 # ------------------------------------------------------------
-# S8A: continuous Spearman correlations in n=163
+# S8A: continuous Spearman correlations, n=163
 # ------------------------------------------------------------
 
 spearman_results <- bind_rows(
   lapply(outcomes, function(v) {
+
     ct <- cor.test(
       tcga$GDF15,
       tcga[[v]],
       method = "spearman",
       exact = FALSE
     )
+
     data.frame(
       Transcript_or_score = v,
       n = sum(complete.cases(tcga[, c("GDF15", v)])),
       Spearman_rho = unname(ct$estimate),
-      P_value = ct$p.value
+      P_value = ct$p.value,
+      stringsAsFactors = FALSE
     )
   })
 )
@@ -345,13 +369,13 @@ write.csv(
   row.names = FALSE
 )
 
-# Current expected values:
-# CD8A rho -0.371, P 1.12e-6
-# GZMA rho -0.363, P 1.94e-6
-# GZMB rho -0.347, P 5.53e-6
-# PRF1 rho -0.408, P 6.45e-8
-# CYT  rho -0.404, P 8.81e-8
-# DDIT3 rho 0.529, P 4.14e-13
+# Current expected:
+# CD8A  rho -0.371, P 1.12e-6
+# GZMA  rho -0.363, P 1.94e-6
+# GZMB  rho -0.347, P 5.53e-6
+# PRF1  rho -0.408, P 6.45e-8
+# CYT   rho -0.404, P 8.81e-8
+# DDIT3 rho  0.529, P 4.14e-13
 
 # ------------------------------------------------------------
 # ABSOLUTE tumor purity
@@ -387,15 +411,17 @@ tcga <- tcga %>%
 
 stopifnot(sum(!is.na(tcga$ABSOLUTE_purity)) == 143)
 
+purity_keep <- !is.na(tcga$ABSOLUTE_purity)
+
 purity_cor <- cor.test(
-  tcga$GDF15[!is.na(tcga$ABSOLUTE_purity)],
-  tcga$ABSOLUTE_purity[!is.na(tcga$ABSOLUTE_purity)],
+  tcga$GDF15[purity_keep],
+  tcga$ABSOLUTE_purity[purity_keep],
   method = "spearman",
   exact = FALSE
 )
 
 purity_gdf15 <- data.frame(
-  n = sum(!is.na(tcga$ABSOLUTE_purity)),
+  n = sum(purity_keep),
   Spearman_rho = unname(purity_cor$estimate),
   P_value = purity_cor$p.value
 )
@@ -406,39 +432,57 @@ write.csv(
   row.names = FALSE
 )
 
-# Current expected: rho ~0.18, P~0.031.
+cat("\nGDF15 vs ABSOLUTE purity:\n")
+print(purity_gdf15)
+cat("Current expected: rho ~0.18; P~0.031.\n")
 
 # ------------------------------------------------------------
-# Partial Spearman by rank residualization
-# One covariate (purity): t-test uses df=n-3.
-# Fisher-z CI uses SE=1/sqrt(n-3).
+# Partial Spearman by rank residualization.
+#
+# With k adjustment covariates:
+#   t-test df = n - k - 2
+#   Fisher-z CI SE = 1 / sqrt(n - k - 3)
+#
+# Here k=1 (ABSOLUTE purity):
+#   df = n - 3
+#   Fisher-z SE = 1 / sqrt(n - 4)
 # ------------------------------------------------------------
 
 partial_spearman <- function(x, y, z) {
-  keep <- complete.cases(x, y, z)
-  x <- rank(x[keep], ties.method = "average")
-  y <- rank(y[keep], ties.method = "average")
-  z <- rank(z[keep], ties.method = "average")
 
-  rx <- resid(lm(x ~ z))
-  ry <- resid(lm(y ~ z))
+  keep <- complete.cases(x, y, z)
+
+  xr <- rank(x[keep], ties.method = "average")
+  yr <- rank(y[keep], ties.method = "average")
+  zr <- rank(z[keep], ties.method = "average")
+
+  rx <- resid(lm(xr ~ zr))
+  ry <- resid(lm(yr ~ zr))
 
   rho <- cor(rx, ry, method = "pearson")
   n <- length(rx)
+  k <- 1L
 
-  dfree <- n - 3
+  if (n <= k + 3) {
+    stop("Insufficient observations for partial-correlation CI.")
+  }
+
+  dfree <- n - k - 2
   t_value <- rho * sqrt(dfree / (1 - rho^2))
   p_value <- 2 * pt(-abs(t_value), df = dfree)
 
-  z_rho <- atanh(max(min(rho, 0.999999), -0.999999))
-  se <- 1 / sqrt(n - 3)
+  bounded_rho <- max(min(rho, 0.999999), -0.999999)
+  z_rho <- atanh(bounded_rho)
+
+  se_z <- 1 / sqrt(n - k - 3)
   zcrit <- qnorm(0.975)
 
-  ci_low <- tanh(z_rho - zcrit * se)
-  ci_high <- tanh(z_rho + zcrit * se)
+  ci_low <- tanh(z_rho - zcrit * se_z)
+  ci_high <- tanh(z_rho + zcrit * se_z)
 
   data.frame(
     n = n,
+    k_covariates = k,
     Partial_rho = rho,
     CI_low = ci_low,
     CI_high = ci_high,
@@ -447,28 +491,30 @@ partial_spearman <- function(x, y, z) {
 }
 
 # ------------------------------------------------------------
-# S8B: purity-adjusted correlations in n=143; BH across six
+# S8B: purity-adjusted partial correlations; BH across six
 # ------------------------------------------------------------
 
-purity_subset <- tcga %>% filter(!is.na(ABSOLUTE_purity))
+purity_subset <- tcga %>%
+  filter(!is.na(ABSOLUTE_purity))
+
 stopifnot(nrow(purity_subset) == 143)
 
 partial_results <- bind_rows(
   lapply(outcomes, function(v) {
+
     x <- partial_spearman(
       purity_subset$GDF15,
       purity_subset[[v]],
       purity_subset$ABSOLUTE_purity
     )
+
     cbind(
       data.frame(Transcript_or_score = v),
       x
     )
   })
 ) %>%
-  mutate(
-    q_value = p.adjust(P_value, method = "BH")
-  )
+  mutate(q_value = p.adjust(P_value, method = "BH"))
 
 write.csv(
   partial_results,
@@ -476,18 +522,23 @@ write.csv(
   row.names = FALSE
 )
 
-# Current expected:
-# CD8A partial rho -0.335, P 4.64e-5
-# GZMA partial rho -0.332, P 5.48e-5
-# GZMB partial rho -0.341, P 3.30e-5
-# PRF1 partial rho -0.360, P 1.11e-5
-# CYT  partial rho -0.363, P 8.92e-6
-# DDIT3 partial rho  0.506, P 1.36e-10
-# all BH q<0.001.
+# Current expected point estimates/P values:
+# CD8A  -0.335, P 4.64e-5
+# GZMA  -0.332, P 5.48e-5
+# GZMB  -0.341, P 3.30e-5
+# PRF1  -0.360, P 1.11e-5
+# CYT   -0.363, P 8.92e-6
+# DDIT3  0.506, P 1.36e-10
+# all q<0.001.
+#
+# Corrected Fisher-z CIs remain the same to two decimals for
+# manuscript-highlighted values:
+# CD8A approximately -0.47 to -0.18
+# CYT  approximately -0.50 to -0.21
+# DDIT3 approximately 0.37 to 0.62
 
 # ------------------------------------------------------------
 # S8D: infiltrating duct carcinoma, NOS only
-# n=143; purity n=123
 # ------------------------------------------------------------
 
 duct <- tcga %>%
@@ -501,6 +552,7 @@ stopifnot(sum(!is.na(duct$ABSOLUTE_purity)) == 123)
 
 duct_results <- bind_rows(
   lapply(outcomes, function(v) {
+
     ct <- cor.test(
       duct$GDF15,
       duct[[v]],
@@ -523,13 +575,12 @@ duct_results <- bind_rows(
       Partial_rho = pa$Partial_rho,
       CI_low = pa$CI_low,
       CI_high = pa$CI_high,
-      Partial_P = pa$P_value
+      Partial_P = pa$P_value,
+      stringsAsFactors = FALSE
     )
   })
 ) %>%
-  mutate(
-    Partial_q = p.adjust(Partial_P, method = "BH")
-  )
+  mutate(Partial_q = p.adjust(Partial_P, method = "BH"))
 
 write.csv(
   duct_results,
@@ -538,8 +589,8 @@ write.csv(
 )
 
 # ------------------------------------------------------------
-# Supplementary Fig. S5: OS
-# Median split remains the split defined above in n=163.
+# Supplementary Fig. S5: overall survival
+# Median split remains defined in n=163 before survival filtering.
 # ------------------------------------------------------------
 
 surv <- read.delim(
@@ -552,26 +603,39 @@ surv <- read.delim(
 
 stopifnot(all(c("sample", "OS.time", "OS") %in% names(surv)))
 
+surv_primary <- surv %>%
+  filter(grepl("-01A$", sample)) %>%
+  select(sample, OS.time, OS) %>%
+  distinct(sample, .keep_all = TRUE)
+
 surv_analysis <- tcga %>%
-  left_join(
-    surv %>%
-      select(sample, OS.time, OS) %>%
-      distinct(sample, .keep_all = TRUE),
-    by = "sample"
-  ) %>%
+  left_join(surv_primary, by = "sample") %>%
   filter(!is.na(OS.time), !is.na(OS)) %>%
-  mutate(OS_months = as.numeric(OS.time) / 30.44)
+  mutate(
+    OS = as.integer(OS),
+    OS_months = as.numeric(OS.time) / 30.44
+  )
 
 stopifnot(nrow(surv_analysis) == 162)
 stopifnot(sum(surv_analysis$GDF15_group == "Low") == 81)
 stopifnot(sum(surv_analysis$GDF15_group == "High") == 81)
+
+missing_os <- tcga %>%
+  anti_join(
+    surv_analysis %>% select(sample),
+    by = "sample"
+  )
+
+stopifnot(nrow(missing_os) == 1)
+stopifnot(as.character(missing_os$GDF15_group[1]) == "High")
 
 fit_lr <- survdiff(
   Surv(OS_months, OS) ~ GDF15_group,
   data = surv_analysis
 )
 
-logrank_p <- 1 - pchisq(fit_lr$chisq, df = 1)
+lr_df <- length(fit_lr$n) - 1
+logrank_p <- 1 - pchisq(fit_lr$chisq, df = lr_df)
 
 s5 <- data.frame(
   n = nrow(surv_analysis),
@@ -579,6 +643,7 @@ s5 <- data.frame(
   High_n = sum(surv_analysis$GDF15_group == "High"),
   Events = sum(surv_analysis$OS),
   Logrank_chisq = unname(fit_lr$chisq),
+  Logrank_df = lr_df,
   Logrank_P = logrank_p
 )
 
@@ -600,10 +665,6 @@ write.csv(
   row.names = FALSE
 )
 
-sink(file.path(out_dir, "sessionInfo_TCGA.txt"))
-sessionInfo()
-sink()
-
 cat("\n============================================\n")
 cat("FINAL TCGA MANUSCRIPT CHECK\n")
 cat("============================================\n")
@@ -623,3 +684,7 @@ cat("\nSupplementary Fig. S5 OS:\n")
 print(s5)
 cat("Expected log-rank P approximately 0.75.\n")
 cat("============================================\n")
+
+sink(file.path(out_dir, "sessionInfo_TCGA.txt"))
+sessionInfo()
+sink()
