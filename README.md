@@ -1,125 +1,110 @@
-Manuscript title:Clinically defined tumor-associated diabetes, intratumoral T-cell densities, and survival in resected pancreatic ductal adenocarcinoma
+# TAD-PDAC analysis scripts
 
-This bundle revises the scripts supplied for the manuscript so that file descriptions,analysis families, cohort definitions, multiple-testing procedures, and figure/tablemapping match the current manuscript and supplementary material.
+Analysis scripts accompanying the manuscript:
 
-Active scripts
+**Clinically defined tumor-associated diabetes, intratumoral T-cell densities, and survival in resected pancreatic ductal adenocarcinoma**
 
-01_survival_analysis.R
+## Scope
 
-Overall survival (OS) and cancer-specific survival (CSS)
+This repository reproduces the **statistical and bioinformatic results** reported
+in the current manuscript. Figures were generated separately and **plotting code
+is not included**.
 
-Primary multivariable model:TAD + pathologic stage + resection margin + NLR + CA19-9
+Patient-level clinical data are not distributed because of participant privacy
+and ethical restrictions. RNA-sequencing data generated in this study are
+available through the European Genome-phenome Archive under accession
+**EGAS00001007212**, and whole-genome sequencing data under accession
+**EGAS00001007211**. Public TCGA-PAAD data were obtained from the UCSC Xena GDC
+Hub.
 
-Sensitivity analyses:continuous HbA1c; adjuvant chemotherapy; log2-continuous CA19-9;log2-continuous CA19-9 + adjuvant chemotherapy; exclusion of neoadjuvant cases
+Clinicopathological comparisons and selected descriptive/IHC group comparisons
+were performed in **IBM SPSS Statistics version 29.0.1**. SPSS syntax is not
+included in this repository. In particular, the unadjusted Fig. 2a comparisons
+and the Fig. 4b GDF15 IHC group comparison are not represented by executable
+SPSS code here. The adjusted Fig. 2c T-cell models are R analyses and are
+included in `05_tcell_adjusted_models.R`.
 
-Four-category diabetes analysis
+## Active scripts
 
-Diabetes-only TAD vs long-standing stable diabetes, with and without HbA1c
+| Script | Analysis |
+|---|---|
+| `01_survival_analysis.R` | OS/CSS; sensitivity models; four diabetes phenotypes; stage-stratified HRs; Wald TAD-by-stage interaction |
+| `02_deseq2_differential_expression.R` | Organoid DESeq2; explicit 500-gene PCA; platform-adjusted sensitivity |
+| `03_preranked_gsea.R` | Hallmark/Reactome pre-ranked GSEA; deterministic tie ordering; MSigDB/version logging |
+| `04_secreted_factor_tpm.py` | TPM-based sensitivity analysis of selected Fig. 3e genes |
+| `05_tcell_adjusted_models.R` | Fig. 2c HC3 models; 2,000-resample bootstrap; HbA1c sensitivity; CD45RO; phenotype and stage-interaction analyses |
+| `06_tcga_paad_analysis.R` | TCGA GDF15/immune/CYT/DDIT3; purity adjustment; duct-only sensitivity; OS |
+| `07_driver_gene_wgs_analysis.R` | Organoid KRAS/TP53/CDKN2A/SMAD4 Fisher tests |
 
-TAD-by-stage interactions
+The files are numbered consecutively so that there are no unexplained gaps.
+Analyses removed from the revised manuscript, including the former exploratory
+GDF15 ELISA/protein-mRNA and ER-stress leave-one-out workflows, are not part of
+this active set.
 
-Stage-stratified adjusted HRs for Supplementary Fig. S2
+## Key reproducibility decisions
 
-02_deseq2_differential_expression.R
+### Survival interaction
 
-36 patient-derived PDAC organoids: TAD n=6, non-TAD n=30
+The TAD-by-stage interaction P values reported for OS and CSS are taken from the
+**Wald test for the interaction coefficient**. The clinical script also asserts
+the stage-specific sample sizes and event counts used in Supplementary Fig. S2.
 
-Primary DESeq2 design: ~ DM_group
+### T-cell models
 
-Low-count filter: row-summed raw count >10
+The primary immune models use log-transformed cell density and adjust for age,
+pathologic stage, log2-transformed CA19-9, continuous NLR, and neoadjuvant
+chemotherapy. HC3 heteroscedasticity-robust covariance is used, and
+Benjamini-Hochberg correction is applied across the three primary outcomes
+(CD4, CD8, FOXP3). Percentile bootstrap confidence intervals use 2,000
+patient-level resamples with a fixed random seed.
 
-apeglm-shrunken log2 fold changes
+### PCA
 
-BH-adjusted P<0.05, no fold-change threshold
+Supplementary Fig. S4 uses variance-stabilized RNA-seq counts and the **500 most
+variable genes**. The `ntop=500` setting is explicit in the script.
 
-Platform-adjusted sensitivity analysis: ~ platform + DM_group
+### GSEA
 
-Variance-stabilized PCA coordinates
+The GSEA ranking metric is
+`sign(shrunken log2FC) * -log10(nominal P)`.
 
-Selected-gene output for Supplementary Table S7A
+Ties are ordered deterministically. The script records the installed
+`clusterProfiler` and `msigdbr` versions and, when exposed by `msigdbr`, the
+MSigDB database release.
 
-03_preranked_gsea.R
+### TPM Mann-Whitney analyses
 
-Pre-ranked GSEA using sign(log2FC) * -log10(P)
+The TPM sensitivity analysis uses `log2(TPM+1)`. This is a strictly monotonic
+transformation and therefore does not change the Mann-Whitney ranks or P value.
+The transformation is retained only for consistency with the expression-scale
+description.
 
-Hallmark and Reactome collections
+### TCGA
 
-Gene-set size 15–500; random seed 42
+The TCGA script:
 
-Prespecified GSEA threshold q<0.25
+- explicitly restricts sample barcodes to `-01A`;
+- removes `_PAR_Y` records before stripping Ensembl version suffixes;
+- records input-file MD5 checksums;
+- records the Ensembl IDs actually used;
+- uses the already transformed Xena FPKM-UQ matrix directly, with no second log transform;
+- defines GDF15-high as expression **at or above the median**;
+- applies BH correction across the six prespecified median-split outcomes;
+- uses the corrected Fisher-z standard error for partial correlation:
+  `1 / sqrt(n - k - 3)`.
 
-Supplementary Table S6:
+## Software
 
-Hallmark panel: all nominal P<0.05
+The manuscript reports:
 
-Reactome panel: all q<0.25
+- R 4.3.3
+- Python 3.10.12
+- IBM SPSS Statistics 29.0.1
 
-04_secreted_factor_tpm.py
+Individual scripts write session/package-version information where applicable.
 
-TPM-based sensitivity analysis for the 12 genes shown in Fig. 3e
+## Code availability
 
-Test is performed on log2(TPM+1) using a two-sided asymptoticMann–Whitney U test
+Suggested manuscript wording:
 
-Descriptive medians and IQRs are reported on the original TPM scale
-
-Produces the current Supplementary Table S7B layout
-
-GDF15 expected P≈0.040; IL33 expected P≈0.155
-
-05_tcga_gdf15_analysis.R
-
-Histologically restricted TCGA-PAAD expression cohort: n=163
-
-infiltrating duct carcinoma, NOS: n=143
-
-adenocarcinoma, NOS: n=20
-
-OS-evaluable cohort: n=162
-
-GDF15 median split is defined in n=163 before OS restriction
-
-Six median-split comparisons:CD8A, GZMA, GZMB, PRF1, CYT, DDIT3
-
-BH correction across those six comparisons
-
-Continuous Spearman correlations for the same six outcomes
-
-ABSOLUTE tumor-purity-adjusted partial Spearman correlations:n=143, with BH correction across six
-
-Histologically stringent duct-carcinoma sensitivity analysis:n=143; purity-evaluable n=123
-
-TCGA OS: GDF15-low n=81, high n=81; log-rank P≈0.75
-
-Maps to Fig. 4c–e, Supplementary Table S8, Supplementary Fig. S5
-
-08_driver_gene_wgs_analysis.R
-
-Fisher exact tests for WGS-derived organoid alteration calls
-
-KRAS, TP53, CDKN2A, SMAD4
-
-TAD n=6, non-TAD n=30
-
-Maps to Supplementary Fig. S3
-
-Removed from the active final analysis
-
-09_er_upr_leave_one_out_analysis.R is not part of the current manuscript.The current Supplementary Table S7 contains:
-
-panel A: primary vs sequencing-platform-adjusted DESeq2 results
-
-panel B: TPM-based sensitivity analysis
-
-The previous leave-one-out ER/UPR overlap analysis should therefore not be describedas Supplementary Table S7 in the final GitHub repository. A note is retained inarchive/09_er_upr_leave_one_out_analysis_ARCHIVED.txt.
-
-Important TCGA expression-scale note
-
-The UCSC Xena TCGA-PAAD.star_fpkm-uq.tsv.gz matrix used for the final analysescontains the log2-transformed FPKM-UQ values used in the manuscript. The analysisscript therefore uses those values directly and does not apply a secondlog2(x+1) transformation.
-
-Controlled-access data
-
-Patient-level clinical and organoid data are not included in this bundle. The scriptsassume local files prepared according to the manuscript Data Availability statement.
-
-Reproducibility
-
-Each active script writes a sessionInfo() or package-version file when run.The TCGA script also writes MD5 checksums for the public input files and records thegene-to-Ensembl mapping used.
+> Analysis scripts used in this study are publicly available at https://github.com/TetsuhisaKo/TAD-PDAC-analysis-scripts. Clinicopathological comparisons and selected unadjusted immunohistochemical group comparisons, including those underlying Fig. 2a and Fig. 4b, were performed using IBM SPSS Statistics version 29.0.1 and are not represented by executable code in the repository. Patient-level clinical data are not included because of participant privacy and ethical restrictions.
