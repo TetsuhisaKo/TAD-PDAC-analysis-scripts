@@ -2,7 +2,7 @@ Analysis scripts for the TAD-PDAC study
 
 This repository contains analysis scripts supporting the manuscript:
 
-"[CURRENT MANUSCRIPT TITLE]"
+"Clinically defined tumor-associated diabetes, intratumoral T-cell infiltration, and survival in resected pancreatic ductal adenocarcinoma"
 
 The scripts document the statistical and bioinformatic workflows used for survival analyses, immunohistochemical analyses, differential gene expression analysis, gene set enrichment analysis, TCGA-PAAD transcriptomic analyses, ELISA quantification, and correlation analyses.
 
