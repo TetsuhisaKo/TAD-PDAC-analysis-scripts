@@ -1,94 +1,103 @@
-"""
-04_secreted_factor_tpm.py
-
-TPM-based sensitivity analysis of selected genes shown in Fig. 3e.
-
-Current manuscript / Supplementary Table S7B:
-- 36 patient-derived PDAC organoids
-- TAD n=6; non-TAD n=30
-- Two-sided Mann-Whitney U test on log2(TPM + 1)
-- Asymptotic approximation is specified explicitly
-- Descriptive median and IQR are reported on the ORIGINAL TPM scale
-- No multiple-testing correction is applied to the TPM-based sensitivity P values
-
-The 12 current Fig. 3e genes are:
-GDF15, PRSS2, CPZ, NXPH4, LYZ, P3H3, HHIPL1, SCG2,
-IL33, COPA, BMP4, FGF19.
-
-Optional:
-If results/organoid_RNAseq/DESeq2_primary_all_results.xlsx exists,
-DESeq2 shrunken log2FC and adjusted P are merged into the output.
-"""
+# ============================================================
+# 04_secreted_factor_tpm.py
+#
+# TPM-based sensitivity analysis of selected genes displayed
+# in Fig. 3e.
+#
+# Computes Supplementary Table S7B.
+# Plotting code is intentionally not included.
+#
+# TAD n=6 vs non-TAD n=30.
+# Two-sided Mann-Whitney U, asymptotic method.
+#
+# The test is performed on log2(TPM+1). Because log2(TPM+1)
+# is strictly monotonic, ranks and ties are unchanged, so the
+# Mann-Whitney P value is identical to that obtained from raw
+# TPM. The transformed scale is retained for consistency with
+# the expression-scale description.
+#
+# TPM-based P values are nominal/unadjusted.
+# ============================================================
 
 from pathlib import Path
 import sys
-import numpy as np
 import pandas as pd
+import numpy as np
 import scipy
 from scipy import stats
 
 INPUT_PATH = Path("data/organoid_expression_TPM.xlsx")
-SHEET = "TPM"
 DESEQ_PATH = Path("results/organoid_RNAseq/DESeq2_primary_all_results.xlsx")
 OUT_DIR = Path("results/organoid_TPM")
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
+SHEET = "TPM"
 GENE_COL = "gene_symbol"
+
+if not INPUT_PATH.exists():
+    raise FileNotFoundError(f"Missing input file: {INPUT_PATH}")
+
+df_expr = pd.read_excel(INPUT_PATH, sheet_name=SHEET)
+
+if GENE_COL not in df_expr.columns:
+    raise ValueError(f"'{GENE_COL}' column not found.")
+
+tpm_cols = [c for c in df_expr.columns if str(c).endswith("_TPM")]
+
+if len(tpm_cols) != 36:
+    raise ValueError(
+        f"Expected 36 *_TPM sample columns, found {len(tpm_cols)}."
+    )
 
 TAD_CASES = {
     "KYK019", "KYK020", "KYK067",
     "KYK084", "KYK090", "KYK093",
 }
 
+sample_ids = [str(c).split("_")[0] for c in tpm_cols]
+groups = np.array([
+    "TAD" if s in TAD_CASES else "non-TAD"
+    for s in sample_ids
+])
+
+if int(np.sum(groups == "TAD")) != 6:
+    raise ValueError("Expected 6 TAD organoid columns.")
+if int(np.sum(groups == "non-TAD")) != 30:
+    raise ValueError("Expected 30 non-TAD organoid columns.")
+
+# Current Fig. 3e selected genes.
 GENES = [
-    "GDF15", "PRSS2", "CPZ", "NXPH4",
-    "LYZ", "P3H3", "HHIPL1", "SCG2",
-    "IL33", "COPA", "BMP4", "FGF19",
+    "GDF15", "PRSS2", "CPZ", "NXPH4", "LYZ", "P3H3",
+    "HHIPL1", "SCG2", "IL33", "COPA", "BMP4", "FGF19",
 ]
 
-if not INPUT_PATH.exists():
-    raise FileNotFoundError(
-        f"{INPUT_PATH} not found. "
-        "This controlled-access input is not distributed with the repository."
-    )
-
-df = pd.read_excel(INPUT_PATH, sheet_name=SHEET)
-
-if GENE_COL not in df.columns:
-    raise ValueError(f"Required column '{GENE_COL}' not found.")
-
-tpm_cols = [c for c in df.columns if str(c).endswith("_TPM")]
-if len(tpm_cols) != 36:
-    raise ValueError(f"Expected 36 *_TPM columns, found {len(tpm_cols)}.")
-
-sample_cases = [str(c).split("_")[0] for c in tpm_cols]
-groups = np.array(["TAD" if c in TAD_CASES else "non-TAD" for c in sample_cases])
-
-if int(np.sum(groups == "TAD")) != 6 or int(np.sum(groups == "non-TAD")) != 30:
-    raise ValueError(
-        "Group counts do not match the current cohort "
-        f"(TAD={np.sum(groups=='TAD')}, non-TAD={np.sum(groups=='non-TAD')})."
-    )
-
 def q1(x):
-    return float(np.quantile(np.asarray(x, dtype=float), 0.25))
+    return float(np.quantile(x, 0.25))
 
 def q3(x):
-    return float(np.quantile(np.asarray(x, dtype=float), 0.75))
+    return float(np.quantile(x, 0.75))
 
 rows = []
 
 for gene in GENES:
-    sub = df.loc[df[GENE_COL] == gene, tpm_cols]
+    gene_rows = df_expr.loc[
+        df_expr[GENE_COL].astype(str) == gene,
+        tpm_cols
+    ]
 
-    if sub.empty:
-        raise ValueError(f"{gene} not found in {GENE_COL}.")
+    if gene_rows.empty:
+        raise ValueError(f"Gene not found in TPM matrix: {gene}")
 
-    # If duplicate gene-symbol rows exist, collapse by arithmetic mean per sample.
-    raw_tpm = sub.astype(float).mean(axis=0).to_numpy()
+    # If duplicate gene-symbol rows exist, collapse sample-wise by mean.
+    values = gene_rows.astype(float).mean(axis=0).to_numpy()
 
-    non_raw = raw_tpm[groups == "non-TAD"]
-    tad_raw = raw_tpm[groups == "TAD"]
+    if np.any(~np.isfinite(values)):
+        raise ValueError(f"Non-finite TPM value detected for {gene}")
+    if np.any(values < 0):
+        raise ValueError(f"Negative TPM value detected for {gene}")
+
+    non_raw = values[groups == "non-TAD"]
+    tad_raw = values[groups == "TAD"]
 
     non_log = np.log2(non_raw + 1.0)
     tad_log = np.log2(tad_raw + 1.0)
@@ -116,14 +125,17 @@ for gene in GENES:
 
 out = pd.DataFrame(rows)
 
-# Optional merge with the current primary DESeq2 results.
+# Merge primary DESeq2 results when available.
 if DESEQ_PATH.exists():
     deseq = pd.read_excel(DESEQ_PATH)
     required = {"SYMBOL", "log2FoldChange", "padj"}
+
     if required.issubset(deseq.columns):
         deseq = (
-            deseq.loc[deseq["SYMBOL"].isin(GENES),
-                      ["SYMBOL", "log2FoldChange", "padj"]]
+            deseq.loc[
+                deseq["SYMBOL"].isin(GENES),
+                ["SYMBOL", "log2FoldChange", "padj"],
+            ]
             .rename(columns={
                 "SYMBOL": "Gene",
                 "log2FoldChange": "DESeq2_log2FC",
@@ -132,7 +144,10 @@ if DESEQ_PATH.exists():
         )
         out = out.merge(deseq, on="Gene", how="left")
 
-# Arrange to mirror Supplementary Table S7B.
+order_map = {g: i for i, g in enumerate(GENES)}
+out["_order"] = out["Gene"].map(order_map)
+out = out.sort_values("_order").drop(columns="_order")
+
 preferred_cols = [
     "Gene",
     "DESeq2_log2FC",
@@ -147,25 +162,34 @@ preferred_cols = [
     "Non_TAD_n",
     "TAD_n",
 ]
+
 out = out[[c for c in preferred_cols if c in out.columns]]
 
-csv_path = OUT_DIR / "Supplementary_Table_S7B_TPM_sensitivity.csv"
-xlsx_path = OUT_DIR / "Supplementary_Table_S7B_TPM_sensitivity.xlsx"
+out.to_csv(
+    OUT_DIR / "Supplementary_Table_S7B_TPM_sensitivity.csv",
+    index=False
+)
 
-out.to_csv(csv_path, index=False)
-out.to_excel(xlsx_path, index=False)
+out.to_excel(
+    OUT_DIR / "Supplementary_Table_S7B_TPM_sensitivity.xlsx",
+    index=False
+)
 
 print(out.to_string(index=False))
 
-# Current manuscript checks:
-# GDF15: non-TAD median ~202.645; TAD median ~574.450; P ~0.040
-# IL33:  non-TAD median ~0.425;   TAD median ~1.655;   P ~0.155
+for gene, expected in [("GDF15", "~0.040"), ("IL33", "~0.155")]:
+    row = out.loc[out["Gene"] == gene]
+    if not row.empty:
+        print(
+            f"{gene} manuscript check: "
+            f"P={float(row['TPM_based_P'].iloc[0]):.6g} "
+            f"(expected {expected})"
+        )
 
-version_path = OUT_DIR / "python_package_versions.txt"
-version_path.write_text(
+(OUT_DIR / "python_package_versions.txt").write_text(
     f"python={sys.version.split()[0]}\n"
     f"pandas={pd.__version__}\n"
     f"numpy={np.__version__}\n"
     f"scipy={scipy.__version__}\n",
     encoding="utf-8",
-)sion__}")
+)
