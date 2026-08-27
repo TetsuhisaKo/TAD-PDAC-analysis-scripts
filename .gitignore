@@ -1,0 +1,22 @@
+# Patient-level / controlled-access data
+data/
+
+# Spreadsheets and generated tabular outputs
+*.xlsx
+*.xls
+*.csv
+
+# Generated analysis outputs
+results/
+
+# R workspace/history
+.Rhistory
+.RData
+.Ruserdata
+
+# Session/output files
+sessionInfo*.txt
+
+# OS/editor metadata
+.DS_Store
+Thumbs.db
