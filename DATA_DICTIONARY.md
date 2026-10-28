@@ -1,203 +1,166 @@
-# Data Dictionary
 
-This document defines the normalized inputs expected by the analysis scripts accompanying:
+# Data dictionary
 
-**New-onset or worsening diabetes, survival, and intratumoral T-cell densities in resected pancreatic ductal adenocarcinoma**
+This document describes the input files and variable coding required by the analysis scripts accompanying the TAD–PDAC manuscript. Patient-level clinical data and controlled-access organoid data are not included in this repository. All paths are relative to the repository root.
 
-Only variables and inputs relevant to the manuscript are described.
+## 1. Surgical cohort: `data/clinical_data.xlsx`
 
-## Data availability
+Used by `01_survival_analysis.R` and `05_tcell_adjusted_models.R`. One row per patient (n = 162). The two scripts use the first worksheet.
 
-Patient-level clinical data are not distributed in this repository because of participant privacy and ethical restrictions.
-
-Organoid sequencing data are available under controlled access in the European Genome-phenome Archive:
-
-- RNA sequencing: `EGAS00001007212`
-- Whole-genome sequencing: `EGAS00001007211`
-
-## 1. `data/clinical_data.xlsx`
-
-Used by:
-
-- `01_survival_analysis.R`
-- `05_tcell_adjusted_models.R`
-
-One row per patient; surgical cohort `n = 162`.
+### Required columns
 
 | Column | Type / coding | Definition |
-|---|---|---|
-| `os_time` | numeric, months | Time from surgery to death or censoring |
-| `os_event` | 0/1 | 1 = death from any cause; 0 = censored |
-| `css_event` | 0/1 | 1 = PDAC death; 0 = censored; non-PDAC deaths are censored |
-| `TAD` | 0/1 | 0 = non-TAD; 1 = TAD |
-| `dm_group` | 0/1/2/3 | 0 = no diabetes; 1 = long-standing stable diabetes; 2 = new-onset diabetes; 3 = worsening diabetes |
-| `stage` | 0/1 | 0 = pathologic stage ≤IIa; 1 = ≥IIb |
-| `margin` | 0/1 | 0 = R0; 1 = R1 |
-| `NLR` | 0/1 | 0 = NLR <2.1; 1 = NLR ≥2.1; used in the primary survival model |
-| `NLR_raw` | numeric | Continuous neutrophil-to-lymphocyte ratio; used in the OS continuous-covariate sensitivity model and adjusted T-cell models |
-| `CA199` | 0/1 | 0 = CA19-9 ≤37 U/mL; 1 = >37 U/mL |
-| `CA199_raw` | numeric, >0 | Raw serum CA19-9; transformed as `log2(CA199_raw)` without an offset when a continuous CA19-9 term is used |
-| `HbA1c` | numeric, % | Preoperative HbA1c |
-| `adj_chemo` | 0/1 | Postoperative adjuvant chemotherapy |
-| `neoadj` | 0/1 | Neoadjuvant chemotherapy |
-| `age` | numeric, years | Age at surgery |
-| `surgery_year` | numeric | Calendar year of surgery |
-| `worsening_basis` | 1/2/3 or NA | For worsening diabetes only: 1 = HbA1c increase alone; 2 = treatment intensification alone; 3 = both |
-| `stable_longitudinal_data` | 0/1 or NA | For long-standing stable diabetes only: 1 = longitudinal glycaemic data available; 0 = unavailable |
-| `BMI` | numeric, kg/m² | Body mass index |
-| `SMI` | numeric, cm²/m² | Skeletal muscle index |
-| `albumin` | numeric, g/dL | Serum albumin |
-| `ECOG_PS` | integer | ECOG performance status; sensitivity analysis uses ≥1 vs 0 |
-| `CD4` | numeric, cells/mm² | Intratumoral CD4+ cell density |
-| `CD8` | numeric, cells/mm² | Intratumoral CD8+ cell density |
-| `FOXP3` | numeric, cells/mm² | Intratumoral FOXP3+ cell density |
+| --- | --- | --- |
+| `os_time` | Numeric; months | Time from surgery to death or last follow-up; also used as the time variable for cancer-specific survival. |
+| `os_event` | 0/1 | Death from any cause (`1`) or censored (`0`). |
+| `css_event` | 0/1 | Death attributed to PDAC (`1`) or censored (`0`); deaths from other causes are censored. |
+| `TAD` | 0/1 | Tumor-associated diabetes (`1`) versus non-TAD (`0`). |
+| `dm_group` | 0/1/2/3 | `0`: no diabetes; `1`: long-standing stable diabetes; `2`: new-onset diabetes; `3`: worsening diabetes. |
+| `stage` | 0/1 | Pathologic stage ≤IIA (`0`) or ≥IIB (`1`). |
+| `margin` | 0/1 | R0 (`0`) or R1 (`1`) resection margin. |
+| `NLR` | 0/1 | Neutrophil-to-lymphocyte ratio <2.1 (`0`) or ≥2.1 (`1`). |
+| `NLR_raw` | Numeric; ≥0 | Continuous neutrophil-to-lymphocyte ratio. |
+| `CA199` | 0/1 | Serum CA19-9 ≤37 U/mL (`0`) or >37 U/mL (`1`). |
+| `CA199_raw` | Numeric; >0, U/mL | Continuous CA19-9, transformed as `log2(CA199_raw)` without an offset in sensitivity analyses. |
+| `HbA1c` | Numeric; % | Preoperative glycated hemoglobin. |
+| `adj_chemo` | 0/1 | Postoperative adjuvant chemotherapy: no (`0`), yes (`1`). |
+| `neoadj` | 0/1 | Neoadjuvant chemotherapy: no (`0`), yes (`1`). |
+| `age` | Numeric; years | Age at surgery. |
+| `surgery_year` | Numeric | Calendar year of surgery. |
+| `worsening_basis` | 1/2/3 or missing | For `dm_group = 3` only: `1` = HbA1c increase alone; `2` = treatment intensification alone; `3` = both. Missing for other groups. |
+| `stable_longitudinal_data` | 0/1 or missing | For `dm_group = 1` only: `1` = longitudinal glycemic data available; `0` = not available. Missing for other groups. |
+| `BMI` | Numeric; kg/m² | Body mass index. |
+| `SMI` | Numeric; cm²/m² | Skeletal muscle index. |
+| `albumin` | Numeric; g/dL | Serum albumin. |
+| `ECOG_PS` | Integer | Eastern Cooperative Oncology Group performance status; categorized as 0 versus ≥1 for sensitivity analyses. |
+| `CD4` | Numeric; >0, cells/mm² | Intratumoral CD4-positive T-cell density. |
+| `CD8` | Numeric; >0, cells/mm² | Intratumoral CD8-positive T-cell density. |
+| `FOXP3` | Numeric; >0, cells/mm² | Intratumoral FOXP3-positive cell density. |
 
-### Group coding
+`TAD = 1` corresponds to `dm_group` 2 or 3; `TAD = 0` corresponds to groups 0 or 1. The main Cox model uses the categorized `NLR` and `CA199` variables. T-cell density models use continuous `NLR_raw` and `log2(CA199_raw)`.
 
-`dm_group`:
+The survival script also uses `log2(CD8)` in its additional OS sensitivity model. Clinical data used by the main models must be complete; the two phenotype-specific classification fields may be missing outside their respective groups.
 
-- `0` = no diabetes
-- `1` = long-standing stable diabetes
-- `2` = new-onset diabetes
-- `3` = worsening diabetes
+### Additional inputs for Table 2 univariable analyses
 
-New-onset and worsening diabetes constitute TAD. No diabetes and long-standing stable diabetes constitute non-TAD.
+The following columns are accepted by `01_survival_analysis.R`. Each binary variable must contain complete 0/1 values, with `0` as its reference category. The accepted alternatives are listed in lookup order.
+
+| Analysis term | Accepted input column(s) | Coding / units |
+| --- | --- | --- |
+| Age ≥65 years | `age` | Derived as age ≥65 versus <65 years. |
+| Male sex | `male`, `male_sex`; alternatively `sex`, `Sex` | Binary: `0` = female, `1` = male; text alternative must contain `Female`/`Male`. Numeric `sex` coding is not inferred. |
+| Tumor size >20 mm | `tumor_gt20`, `tumor_size_gt20`; alternatively `tumor_size_mm`, `tumor_size_mm_raw` | Binary: `0` = ≤20 mm, `1` = >20 mm; or size in mm. |
+| KRAS mutation | `KRAS_mutation`, `KRAS_mut`, `KRAS_any` | `1` = mutation identified in the surgical cohort. |
+| TP53 alteration | `TP53_alteration`, `TP53_alt`, `TP53_any` | `1` = altered according to the surgical-cohort assessment. |
+| SMAD4 alteration | `SMAD4_alteration`, `SMAD4_alt`, `SMAD4_any` | `1` = altered according to the surgical-cohort assessment. |
+| CDKN2A alteration | `CDKN2A_alteration`, `CDKN2A_alt`, `CDKN2A_any` | `1` = altered according to the surgical-cohort assessment. |
+| CEA >5 ng/mL | `CEA_gt5`, `CEA_over5`; alternatively `CEA_raw`, `CEA_ng_mL` | Binary: `0` = ≤5 ng/mL, `1` = >5 ng/mL; or continuous CEA in ng/mL. |
+
+The remaining Table 2 terms (`TAD`, `stage`, `margin`, `NLR`, `CA199`) use the required columns above, giving 13 univariable terms in total. The multivariable OS model uses these five prespecified terms only. If a required input is unavailable or invalid, the corresponding univariable estimate is reported as missing.
 
 ### Cohort validation
 
-The analysis dataset is expected to satisfy:
+| Check | Expected value |
+| --- | --- |
+| Total surgical patients | 162 |
+| Non-TAD / TAD | 98 / 64 |
+| No / stable / new-onset / worsening diabetes | 81 / 17 / 40 / 24 |
+| Stage ≤IIA / ≥IIB | 43 / 119 |
+| OS / PDAC-specific deaths | 120 / 110 |
+| Patients excluding neoadjuvant therapy | 144 |
+| Worsening classification: HbA1c-only / treatment-only / both | 9 / 11 / 4 |
+| Stable diabetes: longitudinal data available / unavailable | 8 / 9 |
 
-- total `n = 162`
-- non-TAD / TAD = `98 / 64`
-- no diabetes / stable / new-onset / worsening = `81 / 17 / 40 / 24`
-- worsening classification basis: HbA1c only / treatment only / both = `9 / 11 / 4`
-- stable diabetes with / without longitudinal glycaemic data = `8 / 9`
-- pathologic stage ≤IIa / ≥IIb = `43 / 119`
-- OS deaths = `120`
-- PDAC-specific deaths = `110`
-- neoadjuvant-excluded cohort = `144`
-- diabetes-only subset = `81`
-
-Rows with `dm_group` 2 or 3 must have `TAD = 1`; rows with `dm_group` 0 or 1 must have `TAD = 0`.
-
-### Survival-model use of NLR and CA19-9
-
-Primary model:
-
-`TAD + stage + margin + NLR + CA199`
-
-where `NLR` and `CA199` are dichotomised variables.
-
-OS continuous-covariate sensitivity model:
-
-`TAD + stage + margin + NLR_raw + log2(CA199_raw)`
-
-Reference TAD estimate reported in Supplementary Table S4:
-
-`HR 1.93 (95% CI 1.31–2.85), P = 0.001`
-
-This model is used for **OS only** (Supplementary Table S4), not CSS (Supplementary Table S3).
-
-## 2. `data/count_matrix.xlsx`
+## 2. Organoid RNA-seq counts: `data/count_matrix.xlsx`
 
 Used by `02_deseq2_differential_expression.R`.
 
-- first column: unique gene symbol
-- remaining columns: raw integer read counts, one column per organoid line
-- total organoid lines: `n = 36`
-- TAD-derived lines: `n = 6`
-- non-TAD-derived lines: `n = 30`
-- TAD lines: `KYK019, KYK020, KYK067, KYK084, KYK090, KYK093`
-- MiSeq: `KYK015`, `KYK019`
-- HiSeq 2500: remaining lines
+| Field | Format |
+| --- | --- |
+| First column | Unique gene symbols; one gene per row. |
+| Remaining 36 columns | One column per organoid; nonnegative, integer raw read counts. |
+| Column names | Begin with each organoid's sample ID; the script extracts the part preceding the first underscore. |
 
-Primary design: `~ DM_group`  
-Platform sensitivity: `~ platform + DM_group`
+The cohort consists of 6 TAD-derived and 30 non-TAD-derived organoids. Two were sequenced on MiSeq and the remainder on HiSeq 2500. The current script determines group and sequencing platform from locally configured sample identifiers. Genes with summed raw counts ≤10 are excluded. The primary design is `~ DM_group`; the platform-adjusted design is `~ platform + DM_group`.
 
-Genes with row-summed raw counts `<=10` are excluded. Log2 fold changes are shrunken with `apeglm`.
+Log2 fold changes are shrunk using `apeglm`; Wald-test P values and BH-adjusted P values are taken from the unshrunken DESeq2 results. PCA uses variance-stabilized expression and the 500 most variable genes.
 
-## 3. Primary DESeq2 output
+### Generated intermediate files
 
-Generated by `02_deseq2_differential_expression.R` and used by `03_preranked_gsea.R`.
+`02` writes `results/organoid_RNAseq/DESeq2_primary_all_results.xlsx`, used by `03` and `04`.
 
-Recommended path:
+| Column | Definition |
+| --- | --- |
+| `SYMBOL` | Gene symbol. |
+| `baseMean` | Mean normalized count. |
+| `raw_log2FoldChange` | Unshrunken TAD-versus-non-TAD log2 fold change. |
+| `lfcSE_raw` | Unshrunken log2 fold-change standard error. |
+| `stat` | Wald statistic. |
+| `pvalue` | Nominal Wald-test P value. |
+| `padj` | BH-adjusted P value. |
+| `log2FoldChange` | `apeglm`-shrunken log2 fold change. |
+| `lfcSE_shrunken` | Shrunk estimate standard error. |
 
-`results/organoid_RNAseq/DESeq2_primary_all_results.xlsx`
+## 3. Gene-set enrichment analysis
 
-Required fields include:
+`03_preranked_gsea.R` ranks genes from the DESeq2 output as:
 
-- `SYMBOL`
-- `baseMean`
-- `raw_log2FoldChange`
-- `lfcSE_raw`
-- `stat`
-- `pvalue`
-- `padj`
-- `log2FoldChange` (apeglm-shrunken)
-- `lfcSE_shrunken`
+`sign(log2FoldChange) × −log10(pvalue)`
 
-The GSEA ranking statistic is:
+The script uses MSigDB **2025.1.Hs** Hallmark and Reactome gene sets, 15–500 genes per set, with BH correction within each collection.
 
-`sign(log2FoldChange) * -log10(pvalue)`
+| Output | Reporting threshold |
+| --- | --- |
+| Supplementary Table S8A: Hallmark | BH-adjusted P <0.25 |
+| Supplementary Table S8B / Fig. 3b: Reactome | BH-adjusted P <0.05 |
+| Additional exploratory Reactome results | BH-adjusted P <0.25 |
 
-## 4. `data/organoid_expression_TPM.xlsx`
+Stage IV-adjusted analyses in Supplementary Table S8C require individual-level clinical annotations that are not distributed and are not implemented in the public scripts.
+
+## 4. Organoid TPM matrix: `data/organoid_expression_TPM.xlsx`
 
 Used by `04_secreted_factor_tpm.py`.
 
-The TPM sheet contains:
+| Field | Format |
+| --- | --- |
+| Worksheet | `TPM` |
+| `gene_symbol` | Gene identifier column. |
+| Remaining expression columns | 36 organoid columns with names ending in `_TPM`; the sample ID precedes the first underscore. |
+| Values | Nonnegative, finite TPM values. |
 
-- `gene_symbol`
-- one `*_TPM` column per organoid line
+For the 12 genes shown in Fig. 3d, duplicate gene-symbol rows are averaged by sample. The script reports medians and quartiles on the TPM scale and two-sided, asymptotic Mann–Whitney U P values (continuity and tie corrections; no multiplicity correction). Primary DESeq2 estimates are merged from script `02` to produce Supplementary Table S9B.
 
-Group comparisons use `log2(TPM + 1)` with two-sided Mann–Whitney U tests.
+## 5. Organoid driver-gene calls: `data/organoid_driver_alterations.xlsx`
 
-## 5. `data/organoid_driver_alterations.xlsx`
+Used by `07_driver_gene_wgs_analysis.R` to produce statistics for Supplementary Fig. S4. One row per organoid (36 rows).
 
-Used by `07_driver_gene_wgs_analysis.R`.
+| Column | Format / alteration definition |
+| --- | --- |
+| `SampleID` | Organoid sample identifier, matching the RNA-seq cohort. |
+| `KRAS_any` | 0/1: KRAS mutation. |
+| `TP53_any` | 0/1: TP53 mutation, heterozygous deletion, or copy-neutral loss of heterozygosity/uniparental disomy. |
+| `CDKN2A_any` | 0/1: CDKN2A mutation or homozygous deletion. |
+| `SMAD4_any` | 0/1: SMAD4 mutation, homozygous deletion, or heterozygous deletion. |
 
-One row per organoid line.
+Calls are pre-derived from WGS. Script `07` performs two-sided Fisher exact tests without multiple-testing adjustment; it does not process reads or call variants.
 
-| Column | Coding | Definition |
-|---|---|---|
-| `SampleID` | string | Organoid identifier |
-| `KRAS_any` | 0/1 | KRAS mutation |
-| `TP53_any` | 0/1 | TP53 mutation, heterozygous deletion, or copy-neutral LOH/UPD |
-| `CDKN2A_any` | 0/1 | CDKN2A mutation or homozygous deletion |
-| `SMAD4_any` | 0/1 | SMAD4 mutation, homozygous deletion, or heterozygous deletion |
+## 6. TCGA-PAAD public inputs: `data/TCGA/`
 
-The script compares alteration frequencies between TAD-derived (`n = 6`) and non-TAD-derived (`n = 30`) organoids using Fisher's exact tests.
+Used by `06_tcga_paad_analysis.R`. The TCGA-PAAD files are obtained from public data resources.
 
-## 6. TCGA-PAAD public inputs
+| File | Required fields / content |
+| --- | --- |
+| `TCGA-PAAD.star_fpkm-uq.tsv.gz` | Gene-by-sample STAR FPKM-UQ expression matrix; primary tumors have sample IDs ending in `-01A`. |
+| `TCGA-PAAD.clinical.tsv.gz` | Clinical annotations; `sample`, `primary_diagnosis.diagnoses`. |
+| `TCGA-PAAD.survival.tsv.gz` | Survival annotations; `sample`, `OS`, `OS.time`. |
+| `gencode.v36.annotation.gtf.gene.probemap` | Gene map; `id`, `gene`. |
+| `TCGA_mastercalls.abs_tables_JSedit.fixed.txt` | PanCanAtlas ABSOLUTE purity; `array`, `call status`, `purity`. |
 
-Used by `06_tcga_paad_analysis.R`.
+UCSC Xena GDC Hub expression data (accessed 28 April 2026) are used on their supplied **log2(FPKM-UQ + 1)** scale; do not transform them again. Gene symbols are mapped with GENCODE v36. The expression cohort has 163 PDAC-compatible primary tumors (143 infiltrating duct carcinoma, NOS; 20 adenocarcinoma, NOS), 162 with OS data and 143 with ABSOLUTE purity estimates. The ductal-histology-only cohort contains 143 tumors (123 with purity estimates).
 
-UCSC Xena GDC Hub data were accessed on 2026-04-28. PanCanAtlas ABSOLUTE tumour-purity data were accessed on 2026-07-31.
+GDF15 is split at the median of the 163 tumors (82 high, 81 low). The transcriptomic outcomes are `CD8A`, `GZMA`, `GZMB`, `PRF1`, `CYT`, and `DDIT3`. `CYT` is the arithmetic mean of log2-scale `GZMA` and `PRF1` expression. TAD phenotype is not defined in TCGA-PAAD because longitudinal diabetes-course information is unavailable.
 
-Public inputs:
+## Data access
 
-- TCGA-PAAD FPKM-UQ expression matrix
-- TCGA-PAAD clinical annotations
-- TCGA-PAAD survival data
-- GENCODE v36 gene-probe map
-- PanCanAtlas ABSOLUTE purity file
+Clinical and organoid patient-level inputs are not publicly distributed. Organoid RNA-seq and WGS sequence data are available under controlled access through the European Genome-phenome Archive, studies `EGAS00001007212` and `EGAS00001007211`, respectively. All donor-level input files and generated files containing donor-linked metadata should remain outside the public repository.
 
-The histologically compatible expression cohort contains `n = 163` primary tumours:
-
-- infiltrating duct carcinoma, NOS: `n = 143`
-- adenocarcinoma, NOS: `n = 20`
-
-Complete OS data are available for `n = 162`. ABSOLUTE purity estimates are available for `n = 143`.
-
-The histology-restricted sensitivity analysis includes:
-
-- expression cohort: `n = 143`
-- complete OS: `n = 142`
-- purity available: `n = 123`
-
-The prespecified transcript/score outcomes are:
-
-`CD8A, GZMA, GZMB, PRF1, CYT, DDIT3`
-
-CYT is the arithmetic mean of the log2-scale GZMA and PRF1 expression values.
-
-TAD cannot be defined in TCGA-PAAD because the required longitudinal glycaemic and treatment data are unavailable.
