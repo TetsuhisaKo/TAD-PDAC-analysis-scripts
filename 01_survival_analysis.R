@@ -1,376 +1,109 @@
+
+#!/usr/bin/env Rscript
 # ============================================================
 # 01_survival_analysis.R
 #
-# Survival analyses in the surgical cohort (n = 162)
+# Outputs (results/survival/):
+#   Table 2           All 13 univariable OS terms and primary multivariable OS
+#   Fig. 1b-c         OS log-rank statistics (TAD; four categories)
+#   Fig. 1c           Adjusted HRs for the four diabetes categories
+#                     (Supplementary Table S6A)
+#   Suppl. Fig. S2    CSS log-rank statistics
+#   Suppl. Fig. S3    Stage-specific Cox models
+#   Suppl. Table S4   CSS sensitivity models
+#   Suppl. Table S5   OS sensitivity models (including CD8 adjustment)
+#   Suppl. Table S6A  Four-category and diabetes-only models
+#   Suppl. Table S6B  TAD-by-stage interaction, OS/CSS rows
+#                     (Wald tests; T-cell rows: 05_tcell_adjusted_models.R)
+#   Also saved: primary CSS model, proportional hazards tests,
+#   median follow-up, session information
 #
-# Outcomes:
-#   Overall survival (OS)
-#   Cancer-specific survival (CSS)
-#
-# Main / supplementary results:
-#   Fig. 1b: TAD vs non-TAD OS
-#   Fig. 1c: OS according to four diabetes phenotypes
-#   Table 2: primary multivariable OS model
-#   Supplementary Fig. S1: TAD vs non-TAD CSS
-#   Supplementary Fig. S2: stage-stratified survival analyses
-#   Supplementary Table S3: CSS sensitivity analyses
-#   Supplementary Table S4: OS sensitivity analyses
-#   Supplementary Table S5A: four diabetes phenotypes and
-#                            diabetes-only survival analyses
-#   Supplementary Table S5B: TAD-by-stage interaction tests
-#
-# Primary multivariable model:
-#   TAD + pathologic stage + resection margin + NLR
-#       + CA19-9 >37 U/mL
-#
-# Sensitivity analyses:
-#   + continuous HbA1c
-#   TAD replaced by continuous HbA1c
-#   + adjuvant chemotherapy
-#   + continuous age
-#   + continuous surgery year
-#   continuous log2 CA19-9 instead of dichotomised CA19-9
-#   continuous NLR + continuous log2 CA19-9 (OS only)
-#   continuous log2 CA19-9 + adjuvant chemotherapy
-#   exclusion of neoadjuvant-chemotherapy patients
-#   exclusion of treatment-only worsening diabetes
-#   diabetes-only exclusion of treatment-only worsening diabetes
-#   diabetes-only restriction of stable diabetes to patients with
-#       available longitudinal glycaemic data
-#   + BMI, SMI, serum albumin and ECOG-PS
-#
-# Additional analyses:
-#   four diabetes phenotypes
-#   TAD vs stable diabetes among patients with diabetes
-#   same diabetes-only model + HbA1c
-#   reduced diabetes-only model: stage + margin
-#   stage-specific Cox models
-#   TAD-by-stage interaction
-#
-# Cohort-count validation:
-#   Total n = 162
-#   non-TAD = 98; TAD = 64
-#   no diabetes = 81
-#   stable diabetes = 17
-#   new-onset diabetes = 40
-#   worsening diabetes = 24
-#   worsening basis: HbA1c only / treatment only / both = 9 / 11 / 4
-#   stable diabetes with / without longitudinal glycaemic data = 8 / 9
-#   ECOG-PS 0 / >=1: non-TAD = 82 / 16; TAD = 53 / 11
-#
-# OS event-count validation:
-#   total = 120
-#   TAD = 52
-#   stable diabetes = 12
-#
-# Stage-specific count validation:
-#   <=IIa: n = 43; OS events = 24; CSS events = 20
-#   >=IIb: n = 119; OS events = 96; CSS events = 90
+# Input: data/clinical_data.xlsx (see DATA_DICTIONARY.md)
 # ============================================================
 
-
 suppressPackageStartupMessages({
-  library(survival)
-  library(dplyr)
   library(readxl)
+  library(dplyr)
+  library(survival)
   library(broom)
 })
 
+# Two diabetes-only sensitivity models appear in both S5 and S6A.
 
-# ============================================================
-# Helper for input-column names
-# ============================================================
+out_dir <- "results/survival"
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
-get_required_col <- function(data, candidates, label) {
+input_file <- "data/clinical_data.xlsx"
+if (!file.exists(input_file)) {
+  stop("Missing controlled-access input: ", input_file)
+}
+raw <- read_excel(input_file, sheet = 1)
 
-  hit <- candidates[candidates %in% names(data)]
+# Additional Table 2 covariates are defined in DATA_DICTIONARY.md.
+# Binary variables are coded 0 (reference) or 1.
 
-  if (length(hit) == 0) {
-    stop(
-      paste0(
-        "Required column for ", label, " not found. Tried: ",
-        paste(candidates, collapse = ", ")
-      )
-    )
+get_col <- function(candidates) {
+  hits <- candidates[candidates %in% names(raw)]
+  if (!length(hits)) {
+    stop("Missing input column: ", paste(candidates, collapse = "/"))
   }
-
-  data[[hit[1]]]
+  raw[[hits[1]]]
 }
 
-
-# ============================================================
-# Data import
-# ============================================================
-
-raw <- read_excel("data/clinical_data.xlsx", sheet = 1)
-
-
-# Existing repository variable names are listed first.
-# Alternative capitalisations are allowed only to make the
-# script robust to spreadsheet-header formatting.
-
 df <- data.frame(
-
-  os_time =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("os_time"),
-        "OS time"
-      )
-    ),
-
-  os_event =
-    as.integer(
-      get_required_col(
-        raw,
-        c("os_event"),
-        "OS event"
-      )
-    ),
-
-  css_event =
-    as.integer(
-      get_required_col(
-        raw,
-        c("css_event"),
-        "CSS event"
-      )
-    ),
-
-  TAD_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("TAD"),
-        "TAD"
-      )
-    ),
-
-  stage_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("stage"),
-        "pathologic stage"
-      )
-    ),
-
-  margin_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("margin"),
-        "resection margin"
-      )
-    ),
-
-  NLR_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("NLR"),
-        "NLR category"
-      )
-    ),
-
-  NLR_raw =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("NLR_raw"),
-        "continuous NLR"
-      )
-    ),
-
-  CA199_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("CA199"),
-        "CA19-9 category"
-      )
-    ),
-
-  CA199_raw =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("CA199_raw"),
-        "continuous CA19-9"
-      )
-    ),
-
-  adj_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("adj_chemo"),
-        "adjuvant chemotherapy"
-      )
-    ),
-
-  neoadj_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("neoadj"),
-        "neoadjuvant chemotherapy"
-      )
-    ),
-
-  HbA1c =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("HbA1c", "hba1c"),
-        "HbA1c"
-      )
-    ),
-
-  age =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("age", "Age"),
-        "age"
-      )
-    ),
-
-  surgery_year =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("surgery_year", "Surgery_year"),
-        "surgery year"
-      )
-    ),
-
-  dm_group_num =
-    as.integer(
-      get_required_col(
-        raw,
-        c("dm_group"),
-        "four-category diabetes phenotype"
-      )
-    ),
-
-  worsening_basis =
-    as.integer(
-      get_required_col(
-        raw,
-        c("worsening_basis"),
-        "worsening-diabetes classification basis"
-      )
-    ),
-
-  stable_longitudinal_data =
-    as.integer(
-      get_required_col(
-        raw,
-        c("stable_longitudinal_data"),
-        "stable-diabetes longitudinal glycaemic data availability"
-      )
-    ),
-
-  BMI =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("BMI", "bmi"),
-        "body mass index"
-      )
-    ),
-
-  SMI =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("SMI", "smi"),
-        "skeletal muscle index"
-      )
-    ),
-
-  albumin =
-    as.numeric(
-      get_required_col(
-        raw,
-        c("albumin", "Albumin"),
-        "serum albumin"
-      )
-    ),
-
-  ECOG_PS =
-    as.integer(
-      get_required_col(
-        raw,
-        c("ECOG_PS", "ECOG-PS", "ECOGPS"),
-        "ECOG performance status"
-      )
-    )
+  os_time = as.numeric(get_col("os_time")),
+  os_event = as.integer(get_col("os_event")),
+  css_event = as.integer(get_col("css_event")),
+  TAD_num = as.integer(get_col("TAD")),
+  stage_num = as.integer(get_col("stage")),
+  margin_num = as.integer(get_col("margin")),
+  NLR_num = as.integer(get_col("NLR")),
+  NLR_raw = as.numeric(get_col("NLR_raw")),
+  CA199_num = as.integer(get_col("CA199")),
+  CA199_raw = as.numeric(get_col("CA199_raw")),
+  adj_num = as.integer(get_col("adj_chemo")),
+  neoadj_num = as.integer(get_col("neoadj")),
+  HbA1c = as.numeric(get_col(c("HbA1c", "hba1c"))),
+  age = as.numeric(get_col(c("age", "Age"))),
+  surgery_year = as.numeric(get_col(
+    c("surgery_year", "Surgery_year")
+  )),
+  dm_group_num = as.integer(get_col("dm_group")),
+  # Defined for worsening diabetes only (dm_group = 3);
+  # 2 = worsening identified by treatment intensification alone.
+  # Full coding in DATA_DICTIONARY.md.
+  worsening_basis = as.integer(get_col("worsening_basis")),
+  # Defined for stable diabetes only (dm_group = 1);
+  # 1 = longitudinal glycaemic data available.
+  stable_longitudinal_data = as.integer(
+    get_col("stable_longitudinal_data")
+  ),
+  BMI = as.numeric(get_col(c("BMI", "bmi"))),
+  SMI = as.numeric(get_col(c("SMI", "smi"))),
+  albumin = as.numeric(get_col(c("albumin", "Albumin"))),
+  ECOG_PS = as.integer(get_col(
+    c("ECOG_PS", "ECOG-PS", "ECOGPS")
+  )),
+  CD8 = as.numeric(get_col(c("CD8", "CD8_density")))
 )
-
-
-# ============================================================
-# Variable coding
-# ============================================================
 
 df <- df %>%
   mutate(
-
-    TAD = factor(
-      TAD_num,
-      levels = c(0, 1),
-      labels = c("non-TAD", "TAD")
-    ),
-
-    stage = factor(
-      stage_num,
-      levels = c(0, 1),
-      labels = c("<=IIa", ">=IIb")
-    ),
-
-    margin = factor(
-      margin_num,
-      levels = c(0, 1),
-      labels = c("R0", "R1")
-    ),
-
-    NLR = factor(
-      NLR_num,
-      levels = c(0, 1),
-      labels = c("<2.1", ">=2.1")
-    ),
-
-    CA199 = factor(
-      CA199_num,
-      levels = c(0, 1),
-      labels = c("<=37", ">37")
-    ),
-
-    adj_chemo = factor(
-      adj_num,
-      levels = c(0, 1),
-      labels = c("No", "Yes")
-    ),
-
-    neoadj = factor(
-      neoadj_num,
-      levels = c(0, 1),
-      labels = c("No", "Yes")
-    ),
-
+    TAD = factor(TAD_num, c(0, 1), c("non-TAD", "TAD")),
+    stage = factor(stage_num, c(0, 1), c("<=IIa", ">=IIb")),
+    margin = factor(margin_num, c(0, 1), c("R0", "R1")),
+    NLR = factor(NLR_num, c(0, 1), c("<2.1", ">=2.1")),
+    CA199 = factor(CA199_num, c(0, 1), c("<=37", ">37")),
+    adj_chemo = factor(adj_num, c(0, 1), c("No", "Yes")),
+    neoadj = factor(neoadj_num, c(0, 1), c("No", "Yes")),
     dm4 = factor(
       dm_group_num,
-      levels = c(0, 1, 2, 3),
+      levels = 0:3,
       labels = c(
-        "No diabetes",
-        "Stable diabetes",
-        "New-onset diabetes",
-        "Worsening diabetes"
+        "No diabetes", "Stable diabetes",
+        "New-onset diabetes", "Worsening diabetes"
       )
     ),
-
     dm_compare = factor(
       case_when(
         dm_group_num == 1 ~ "Stable diabetes",
@@ -379,179 +112,95 @@ df <- df %>%
       ),
       levels = c("Stable diabetes", "TAD")
     ),
-
     ECOG_hi = as.integer(ECOG_PS >= 1),
-
-    CA199_log2 = log2(CA199_raw)
+    CA199_log2 = log2(CA199_raw),
+    CD8_log2 = log2(CD8)
   )
 
-
-# ============================================================
-# Data checks
-# ============================================================
-
-stopifnot(nrow(df) == 162)
-
-stopifnot(sum(df$TAD == "TAD") == 64)
-stopifnot(sum(df$TAD == "non-TAD") == 98)
-
-stopifnot(sum(df$dm4 == "No diabetes") == 81)
-stopifnot(sum(df$dm4 == "Stable diabetes") == 17)
-stopifnot(sum(df$dm4 == "New-onset diabetes") == 40)
-stopifnot(sum(df$dm4 == "Worsening diabetes") == 24)
-
-# TAD must correspond exactly to new-onset + worsening diabetes.
+# ------------------------------------------------------------
+# Cohort validation
+# ------------------------------------------------------------
 stopifnot(
-  all(
-    df$TAD_num ==
-      as.integer(df$dm_group_num %in% c(2, 3))
-  )
+  nrow(df) == 162,
+  !anyNA(df$dm_group_num),
+  sum(df$TAD_num == 0) == 98,
+  sum(df$TAD_num == 1) == 64,
+  identical(
+    as.integer(table(df$dm_group_num)),
+    c(81L, 17L, 40L, 24L)
+  ),
+  sum(df$os_event) == 120,
+  sum(df$css_event) == 110,
+  all(df$CA199_raw > 0),
+  all(df$NLR_raw >= 0),
+  all(is.finite(df$CD8)),
+  all(df$CD8 > 0),
+  all(df$TAD_num ==
+        as.integer(df$dm_group_num %in% c(2, 3)))
 )
 
-# Worsening-diabetes classification basis:
-#   1 = HbA1c increase only
-#   2 = treatment intensification only
-#   3 = both
+is_worsening <- df$dm_group_num == 3
+is_stable <- df$dm_group_num == 1
+wb <- df$worsening_basis
+sld <- df$stable_longitudinal_data
+
 stopifnot(
-  all(is.na(df$worsening_basis[df$dm_group_num != 3])),
-  all(df$worsening_basis[df$dm_group_num == 3] %in% c(1, 2, 3)),
-  sum(df$worsening_basis == 1, na.rm = TRUE) == 9,
-  sum(df$worsening_basis == 2, na.rm = TRUE) == 11,
-  sum(df$worsening_basis == 3, na.rm = TRUE) == 4
+  # worsening_basis: coded 1-3 for all 24 worsening cases only
+  all(wb[is_worsening] %in% 1:3),
+  !any(wb[!is_worsening] %in% 1:3),
+  sum(wb[is_worsening] == 1) == 9,
+  sum(wb[is_worsening] == 2) == 11,
+  sum(wb[is_worsening] == 3) == 4,
+  # stable_longitudinal_data: 0/1 for all 17 stable cases;
+  # value 1 occurs only within stable diabetes
+  all(sld[is_stable] %in% 0:1),
+  sum(sld[is_stable] == 1) == 8,
+  sum(sld[is_stable] == 0) == 9,
+  sum(sld == 1, na.rm = TRUE) == 8
 )
 
-# Long-standing stable diabetes:
-#   1 = longitudinal glycaemic data available
-#   0 = unavailable
-stopifnot(
-  all(is.na(df$stable_longitudinal_data[df$dm_group_num != 1])),
-  all(df$stable_longitudinal_data[df$dm_group_num == 1] %in% c(0, 1)),
-  sum(df$stable_longitudinal_data == 1, na.rm = TRUE) == 8,
-  sum(df$stable_longitudinal_data == 0, na.rm = TRUE) == 9
+model_cols <- c(
+  "os_time", "os_event", "css_event", "TAD",
+  "stage", "margin", "NLR", "CA199",
+  "CA199_log2", "NLR_raw", "HbA1c",
+  "age", "surgery_year", "adj_chemo",
+  "BMI", "SMI", "albumin", "ECOG_hi", "CD8_log2"
 )
+stopifnot(all(complete.cases(df[model_cols])))
 
-# Body-status covariates are complete in the 162-patient cohort.
-stopifnot(
-  !anyNA(df$BMI),
-  !anyNA(df$SMI),
-  !anyNA(df$albumin),
-  !anyNA(df$ECOG_PS),
-  all(df$ECOG_PS >= 0)
-)
-
-# Correct ECOG-PS distribution.
-stopifnot(
-  sum(df$TAD_num == 0 & df$ECOG_hi == 0) == 82,
-  sum(df$TAD_num == 0 & df$ECOG_hi == 1) == 16,
-  sum(df$TAD_num == 1 & df$ECOG_hi == 0) == 53,
-  sum(df$TAD_num == 1 & df$ECOG_hi == 1) == 11
-)
-
-stopifnot(sum(df$os_event) == 120)
-stopifnot(sum(df$css_event) == 110)
-
-stopifnot(all(df$CA199_raw > 0))
-stopifnot(!anyNA(df$NLR_raw))
-stopifnot(all(df$NLR_raw >= 0))
-
-cat("\nCohort checks passed.\n")
-
-
-# ============================================================
-# Median follow-up: reverse Kaplan-Meier
-# ============================================================
-
-reverse_km <- survfit(
-  Surv(os_time, 1 - os_event) ~ 1,
-  data = df
-)
-
-cat("\n================ MEDIAN FOLLOW-UP ================\n")
-print(reverse_km$table["median"])
-
-
-# ============================================================
-# Kaplan-Meier / log-rank
-# ============================================================
-
-cat("\n================ KM / LOG-RANK ================\n")
-
-cat("\n-- OS: TAD vs non-TAD (Fig. 1b) --\n")
-print(
-  survdiff(
-    Surv(os_time, os_event) ~ TAD,
-    data = df
-  )
-)
-
-cat("\n-- CSS: TAD vs non-TAD (Supplementary Fig. S1) --\n")
-print(
-  survdiff(
-    Surv(os_time, css_event) ~ TAD,
-    data = df
-  )
-)
-
-cat("\n-- OS: four diabetes phenotypes (Fig. 1c) --\n")
-print(
-  survdiff(
-    Surv(os_time, os_event) ~ dm4,
-    data = df
-  )
-)
-
-
-# ============================================================
+# ------------------------------------------------------------
 # Helper functions
-# ============================================================
+# ------------------------------------------------------------
+endpoint_label <- c(os_event = "OS", css_event = "CSS")
+
+cox_fit <- function(endpoint, rhs, data = df) {
+  f <- as.formula(paste0(
+    "Surv(os_time, ", endpoint, ") ~ ", rhs
+  ))
+  coxph(f, data = data, ties = "efron")
+}
 
 tidy_cox <- function(fit) {
-
-  broom::tidy(
-    fit,
-    exponentiate = TRUE,
-    conf.int = TRUE
-  ) %>%
-    select(
-      term,
-      estimate,
-      conf.low,
-      conf.high,
-      p.value
-    )
+  broom::tidy(fit, exponentiate = TRUE, conf.int = TRUE)
 }
 
-
-extract_term <- function(fit, pattern) {
-
-  tidy_cox(fit) %>%
-    filter(grepl(pattern, term))
-}
-
-
-key_result <- function(
-    fit,
-    model,
-    endpoint,
-    pattern = "^TADTAD$"
-) {
-
-  x <- extract_term(fit, pattern)
-
+# One coefficient per model. Term identifies the estimand:
+#   TADTAD          TAD vs non-TAD
+#   HbA1c           per 1% increase in HbA1c
+#   dm_compareTAD   TAD vs stable diabetes (diabetes-only models)
+model_result <- function(fit, label, endpoint,
+                         pattern = "^TADTAD$") {
+  x <- tidy_cox(fit)
+  x <- x[grepl(pattern, x$term), , drop = FALSE]
   if (nrow(x) != 1) {
-    stop(
-      paste(
-        "Expected one matching coefficient for",
-        model,
-        "but found",
-        nrow(x)
-      )
-    )
+    stop("Expected exactly one coefficient in: ", label)
   }
-
   data.frame(
-    Endpoint = endpoint,
-    Model = model,
+    Endpoint = endpoint_label[[endpoint]],
+    Model = label,
+    Term = x$term,
+    N = fit$n,
+    Events = fit$nevent,
     HR = x$estimate,
     CI_low = x$conf.low,
     CI_high = x$conf.high,
@@ -559,856 +208,609 @@ key_result <- function(
   )
 }
 
-
-# ============================================================
-# PRIMARY MULTIVARIABLE MODELS
-#
-# Table 2 / Supplementary Tables S2-S3
-# ============================================================
-
-cox_os_primary <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199,
-  data = df
-)
-
-cox_css_primary <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199,
-  data = df
-)
-
-
-cat("\n================ PRIMARY OS ================\n")
-print(tidy_cox(cox_os_primary))
-
-cat("\n================ PRIMARY CSS ================\n")
-print(tidy_cox(cox_css_primary))
-
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.84 (1.25-2.72), P = 0.002
-# CSS: HR 1.87 (1.25-2.81), P = 0.002
-
-
-# ============================================================
-# Proportional-hazards assumption
-# ============================================================
-
-cat("\n================ PH ASSUMPTION: OS ================\n")
-print(cox.zph(cox_os_primary))
-
-cat("\n================ PH ASSUMPTION: CSS ================\n")
-print(cox.zph(cox_css_primary))
-
-
-# ============================================================
-# SENSITIVITY: + continuous HbA1c
-# ============================================================
-
-cox_os_hba1c <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199 + HbA1c,
-  data = df
-)
-
-cox_css_hba1c <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199 + HbA1c,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 2.18 (1.31-3.62), P = 0.003
-# CSS: HR 2.40 (1.41-4.07), P = 0.001
-
-
-# ============================================================
-# SENSITIVITY: HbA1c replacing TAD
-#
-# Same clinicopathological covariates as the primary model,
-# with continuous HbA1c entered instead of TAD.
-# ============================================================
-
-cox_os_hba1c_replace <- coxph(
-  Surv(os_time, os_event) ~
-    HbA1c + stage + margin + NLR + CA199,
-  data = df
-)
-
-cox_css_hba1c_replace <- coxph(
-  Surv(os_time, css_event) ~
-    HbA1c + stage + margin + NLR + CA199,
-  data = df
-)
-
-# Reference HbA1c estimates reported in the manuscript (per 1% increase):
-# OS:  HR 1.08 (0.96-1.21), P = 0.220
-# CSS: HR 1.06 (0.94-1.20), P = 0.359
-
-
-# ============================================================
-# SENSITIVITY: + adjuvant chemotherapy
-# ============================================================
-
-cox_os_adj <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199 + adj_chemo,
-  data = df
-)
-
-cox_css_adj <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199 + adj_chemo,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.64 (1.09-2.46), P = 0.018
-# CSS: HR 1.68 (1.10-2.56), P = 0.016
-
-
-# ============================================================
-# SENSITIVITY: + continuous age
-# ============================================================
-
-cox_os_age <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199 + age,
-  data = df
-)
-
-cox_css_age <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199 + age,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.81 (1.22-2.67), P = 0.003
-# CSS: HR 1.85 (1.23-2.77), P = 0.003
-
-
-# ============================================================
-# SENSITIVITY: + continuous surgery year
-# ============================================================
-
-cox_os_year <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199 + surgery_year,
-  data = df
-)
-
-cox_css_year <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199 + surgery_year,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.85 (1.26-2.74), P = 0.002
-# CSS: HR 1.89 (1.26-2.83), P = 0.002
-#
-# Surgery-year coefficient itself:
-# OS:  HR 0.97/year (0.91-1.05), P = 0.497
-# CSS: HR 0.98/year (0.91-1.06), P = 0.624
-
-
-# ============================================================
-# SENSITIVITY: log2-transformed continuous CA19-9
-# ============================================================
-
-cox_os_logca <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199_log2,
-  data = df
-)
-
-cox_css_logca <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199_log2,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.86 (1.26-2.74), P = 0.002
-# CSS: HR 1.93 (1.29-2.89), P = 0.001
-
-
-# ============================================================
-# SENSITIVITY (OS ONLY):
-# continuous NLR + log2-transformed continuous CA19-9
-#
-# This model corresponds to Supplementary Table S4 and is not
-# applied to CSS / Supplementary Table S3.
-# ============================================================
-
-cox_os_continuous_nlr_logca <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR_raw + CA199_log2,
-  data = df
-)
-
-stopifnot(nobs(cox_os_continuous_nlr_logca) == 162)
-
-cat("\n================ OS: CONTINUOUS NLR + LOG2 CA19-9 ================\n")
-print(tidy_cox(cox_os_continuous_nlr_logca))
-
-# Reference TAD estimate reported in the manuscript:
-# HR 1.93 (1.31-2.85), P = 0.001
-
-
-# ============================================================
-# SENSITIVITY:
-# log2-transformed continuous CA19-9 + adjuvant chemotherapy
-# ============================================================
-
-cox_os_logca_adj <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR +
-    CA199_log2 + adj_chemo,
-  data = df
-)
-
-cox_css_logca_adj <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR +
-    CA199_log2 + adj_chemo,
-  data = df
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.63 (1.09-2.45), P = 0.018
-# CSS: HR 1.71 (1.12-2.61), P = 0.012
-
-
-# ============================================================
-# SENSITIVITY: excluding neoadjuvant chemotherapy
-# ============================================================
-
-df_noNAC <- df %>%
-  filter(neoadj == "No")
-
-stopifnot(nrow(df_noNAC) == 144)
-
-cox_os_noNAC <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199,
-  data = df_noNAC
-)
-
-cox_css_noNAC <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + stage + margin + NLR + CA199,
-  data = df_noNAC
-)
-
-# Reference TAD estimates reported in the manuscript:
-# OS:  HR 1.73 (1.13-2.62), P = 0.011
-# CSS: HR 1.78 (1.16-2.73), P = 0.009
-
-
-# ============================================================
-# CLASSIFICATION SENSITIVITY:
-# excluding treatment-only worsening diabetes
-#
-# worsening_basis:
-#   1 = HbA1c increase only
-#   2 = treatment intensification only
-#   3 = both
-# ============================================================
-
-df_no_treatment_only <- df %>%
-  filter(
-    !(
-      dm_group_num == 3 &
-        coalesce(worsening_basis == 2L, FALSE)
+group_counts <- function(data, label, endpoint = "os_event") {
+  data %>%
+    group_by(Group = dm_compare) %>%
+    summarise(
+      N = n(),
+      Events = sum(.data[[endpoint]]),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      Endpoint = endpoint_label[[endpoint]],
+      Model = label,
+      .before = 1
     )
-  )
+}
 
-stopifnot(nrow(df_no_treatment_only) == 151)
-stopifnot(sum(df_no_treatment_only$os_event) == 110)
-
-cox_os_no_treatment_only <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199,
-  data = df_no_treatment_only
-)
-
-stopifnot(nobs(cox_os_no_treatment_only) == 151)
-
-# Reference result reported in the manuscript:
-# HR 1.70 (1.12-2.56), P = 0.012
-
-
-# ============================================================
-# CLASSIFICATION SENSITIVITY:
-# diabetes only, excluding treatment-only worsening diabetes
-# ============================================================
-
-df_dm_no_treatment_only <- df %>%
-  filter(
-    !is.na(dm_compare),
-    !(
-      dm_group_num == 3 &
-        coalesce(worsening_basis == 2L, FALSE)
-    )
-  )
-
-stopifnot(nrow(df_dm_no_treatment_only) == 70)
-stopifnot(sum(df_dm_no_treatment_only$os_event) == 54)
-stopifnot(
-  sum(df_dm_no_treatment_only$dm_compare == "Stable diabetes") == 17,
-  sum(df_dm_no_treatment_only$dm_compare == "TAD") == 53
-)
-
-cox_dm_no_treatment_only <- coxph(
-  Surv(os_time, os_event) ~
-    dm_compare + stage + margin + NLR + CA199,
-  data = df_dm_no_treatment_only
-)
-
-stopifnot(nobs(cox_dm_no_treatment_only) == 70)
-
-# Reference result reported in the manuscript:
-# HR 2.21 (1.12-4.36), P = 0.022
-
-
-# ============================================================
-# CLASSIFICATION SENSITIVITY:
-# diabetes only, stable diabetes restricted to patients
-# with available longitudinal glycaemic data
-# ============================================================
-
-df_dm_stable_longitudinal <- df %>%
-  filter(
-    dm_group_num %in% c(2, 3) |
-      (
-        dm_group_num == 1 &
-          stable_longitudinal_data == 1L
-      )
-  )
-
-stopifnot(nrow(df_dm_stable_longitudinal) == 72)
-stopifnot(sum(df_dm_stable_longitudinal$os_event) == 59)
-stopifnot(
-  sum(df_dm_stable_longitudinal$dm_compare == "Stable diabetes") == 8,
-  sum(df_dm_stable_longitudinal$dm_compare == "TAD") == 64
-)
-
-cox_dm_stable_longitudinal <- coxph(
-  Surv(os_time, os_event) ~
-    dm_compare + stage + margin + NLR + CA199,
-  data = df_dm_stable_longitudinal
-)
-
-stopifnot(nobs(cox_dm_stable_longitudinal) == 72)
-
-# Reference result reported in the manuscript:
-# HR 2.13 (0.92-4.93), P = 0.076
-
-
-# ============================================================
-# SENSITIVITY:
-# + BMI, SMI, serum albumin and ECOG-PS
-# ============================================================
-
-cox_os_body_status <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + stage + margin + NLR + CA199 +
-    BMI + SMI + albumin + ECOG_hi,
-  data = df
-)
-
-stopifnot(nobs(cox_os_body_status) == 162)
-
-# Reference result reported in the manuscript:
-# HR 1.70 (1.14-2.51), P = 0.009
-
-
-cat("\n================ CLASSIFICATION / BODY-STATUS SENSITIVITIES ================\n")
-
-cat("\n-- Excluding treatment-only worsening --\n")
-print(extract_term(cox_os_no_treatment_only, "^TADTAD$"))
-
-cat("\n-- Diabetes only, excluding treatment-only worsening --\n")
-print(extract_term(cox_dm_no_treatment_only, "^dm_compareTAD$"))
-
-cat("\n-- Diabetes only, stable DM restricted to longitudinal data --\n")
-print(extract_term(cox_dm_stable_longitudinal, "^dm_compareTAD$"))
-
-cat("\n-- + BMI, SMI, serum albumin and ECOG-PS --\n")
-print(extract_term(cox_os_body_status, "^TADTAD$"))
-
-
-# ============================================================
-# COLLINEARITY:
-# primary model + HbA1c
-# ============================================================
-
-if (requireNamespace("car", quietly = TRUE)) {
-
-  cat("\n================ VIF: OS + HbA1c ================\n")
-
-  vif_values <- car::vif(cox_os_hba1c)
-  print(vif_values)
-
-  if (is.matrix(vif_values)) {
-    # Generalised VIF output, if generated.
-    adjusted_vif <- vif_values[, "GVIF"]^(
-      1 / (2 * vif_values[, "Df"])
-    )
-    cat(
-      "Maximum adjusted GVIF:",
-      max(adjusted_vif),
-      "\n"
-    )
-  } else {
-    cat(
-      "Maximum VIF:",
-      max(vif_values),
-      "\n"
-    )
-  }
-
-} else {
-
-  cat(
-    "\nPackage 'car' is not installed; VIF calculation skipped.\n"
+ph_table <- function(fit, label) {
+  z <- cox.zph(fit)$table
+  data.frame(
+    Model = label,
+    Term = rownames(z),
+    Chi_square = z[, "chisq"],
+    df = z[, "df"],
+    P_value = z[, "p"],
+    row.names = NULL
   )
 }
 
-
-# ============================================================
-# SUPPLEMENTARY TABLE S3 / S4:
-# collect sensitivity results
-#
-# S3 = cancer-specific survival (CSS)
-# S4 = overall survival (OS)
-#
-# The continuous-NLR + log2-CA19-9 model is OS only and is
-# therefore included in S4 but not S3.
-# ============================================================
-
-results_os <- bind_rows(
-
-  key_result(
-    cox_os_primary,
-    "Primary multivariable model",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_hba1c,
-    "+ HbA1c",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_adj,
-    "+ Adjuvant chemotherapy",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_age,
-    "+ continuous age",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_year,
-    "+ continuous surgery year",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_logca,
-    "Using log2-transformed CA19-9",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_continuous_nlr_logca,
-    "Using continuous NLR and log2-transformed CA19-9",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_logca_adj,
-    "Using log2-transformed CA19-9 + Adjuvant chemotherapy",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_noNAC,
-    "Excluding neoadjuvant chemotherapy",
-    "OS"
-  ),
-
-  key_result(
-    cox_os_hba1c_replace,
-    "Replacing TAD with HbA1c",
-    "OS",
-    "^HbA1c$"
-  ),
-
-  key_result(
-    cox_os_no_treatment_only,
-    "Excluding treatment-only worsening",
-    "OS"
-  ),
-
-  key_result(
-    cox_dm_no_treatment_only,
-    "Diabetes only, excluding treatment-only worsening",
-    "OS",
-    "^dm_compareTAD$"
-  ),
-
-  key_result(
-    cox_dm_stable_longitudinal,
-    "Diabetes only, stable DM with longitudinal data",
-    "OS",
-    "^dm_compareTAD$"
-  ),
-
-  key_result(
-    cox_os_body_status,
-    "+ BMI, SMI, serum albumin and ECOG-PS",
-    "OS"
+save_csv <- function(x, name) {
+  write.csv(
+    x, file.path(out_dir, name),
+    row.names = FALSE
   )
+}
+
+base_rhs <- "TAD + stage + margin + NLR + CA199"
+base_without_tad <- "stage + margin + NLR + CA199"
+
+# ------------------------------------------------------------
+# Primary OS/CSS models
+# ------------------------------------------------------------
+cox_os_primary <- cox_fit("os_event", base_rhs)
+cox_css_primary <- cox_fit("css_event", base_rhs)
+
+cat("Primary OS model:\n")
+print(tidy_cox(cox_os_primary))
+cat("Primary CSS model:\n")
+print(tidy_cox(cox_css_primary))
+
+# ------------------------------------------------------------
+# Table 2: ALL 13 univariable covariates
+# ------------------------------------------------------------
+# Input columns for additional Table 2 terms are described in
+# DATA_DICTIONARY.md. Missing or invalid values yield NA estimates.
+
+optional_col <- function(candidates) {
+  matches <- candidates[candidates %in% names(raw)]
+  if (!length(matches)) return(NULL)
+  raw[[matches[1]]]
+}
+
+strict_binary <- function(x, variable) {
+  if (is.null(x)) return(NULL)
+  values <- trimws(as.character(x))
+  values[values == ""] <- NA_character_
+  if (anyNA(values) || !all(values %in% c("0", "1"))) {
+    warning(variable, ": expected complete 0/1 coding; not analysed.")
+    return(NULL)
+  }
+  as.integer(values)
+}
+
+optional_category <- function(binary_candidates, numeric_candidates,
+                              threshold, variable) {
+  binary <- strict_binary(optional_col(binary_candidates), variable)
+  if (!is.null(binary)) return(binary)
+  numeric_values <- optional_col(numeric_candidates)
+  if (is.null(numeric_values)) return(NULL)
+  x <- suppressWarnings(as.numeric(numeric_values))
+  if (length(x) != nrow(df) || any(!is.finite(x)) || any(x < 0)) {
+    warning(variable, ": incomplete/invalid numeric input; not analysed.")
+    return(NULL)
+  }
+  as.integer(x > threshold)
+}
+
+df$age_ge65 <- factor(as.integer(df$age >= 65), 0:1,
+                       c("<65", ">=65"))
+
+male_values <- strict_binary(optional_col(c("male", "male_sex")),
+                             "Male sex")
+if (is.null(male_values)) {
+  sx <- optional_col(c("sex", "Sex"))
+  if (!is.null(sx)) {
+    sx <- trimws(tolower(as.character(sx)))
+    if (!anyNA(sx) && all(sx %in% c("female", "male"))) {
+      male_values <- as.integer(sx == "male")
+    } else {
+      warning("sex must contain Female/Male for this input format.")
+    }
+  }
+}
+
+tumor_values <- optional_category(
+  c("tumor_gt20", "tumor_size_gt20"),
+  c("tumor_size_mm", "tumor_size_mm_raw"),
+  20, "Tumor size >20 mm"
+)
+cea_values <- optional_category(
+  c("CEA_gt5", "CEA_over5"),
+  c("CEA_raw", "CEA_ng_mL"),
+  5, "CEA >5 ng/mL"
 )
 
+extra_data <- list(
+  male = male_values,
+  tumor_gt20 = tumor_values,
+  KRAS = strict_binary(optional_col(
+    c("KRAS_mutation", "KRAS_mut", "KRAS_any")), "KRAS mutation"),
+  TP53 = strict_binary(optional_col(
+    c("TP53_alteration", "TP53_alt", "TP53_any")), "TP53 alteration"),
+  SMAD4 = strict_binary(optional_col(
+    c("SMAD4_alteration", "SMAD4_alt", "SMAD4_any")), "SMAD4 alteration"),
+  CDKN2A = strict_binary(optional_col(
+    c("CDKN2A_alteration", "CDKN2A_alt", "CDKN2A_any")),
+    "CDKN2A alteration"),
+  CEA_gt5 = cea_values
+)
 
-results_css <- bind_rows(
+for (nm in names(extra_data)) {
+  x <- extra_data[[nm]]
+  if (!is.null(x)) {
+    if (length(x) != nrow(df) || length(unique(x)) < 2L) {
+      warning(nm, ": invalid length or no category variation; not analysed.")
+    } else {
+      df[[nm]] <- factor(x, levels = 0:1, labels = c("No", "Yes"))
+    }
+  }
+}
 
-  key_result(
-    cox_css_primary,
-    "Primary multivariable model",
-    "CSS"
+# Table 2 variables (manuscript order).
+# In multivariable Cox regression, only five prespecified terms enter.
+table2_specs <- data.frame(
+  Variable = c(
+    "Tumor-associated diabetes (TAD)", "Age >=65 years", "Male sex",
+    "Pathologic stage >=IIb", "R1 resection margin",
+    "Tumor size >20 mm", "KRAS mutation", "TP53 alteration",
+    "SMAD4 alteration", "CDKN2A alteration", "NLR >=2.1",
+    "CEA >5 ng/mL", "CA19-9 >37 U/mL"
   ),
-
-  key_result(
-    cox_css_hba1c,
-    "+ HbA1c",
-    "CSS"
+  Column = c(
+    "TAD", "age_ge65", "male", "stage", "margin",
+    "tumor_gt20", "KRAS", "TP53", "SMAD4", "CDKN2A",
+    "NLR", "CEA_gt5", "CA199"
   ),
+  stringsAsFactors = FALSE
+)
 
-  key_result(
-    cox_css_adj,
-    "+ Adjuvant chemotherapy",
-    "CSS"
-  ),
+multi_os <- tidy_cox(cox_os_primary)
 
-  key_result(
-    cox_css_age,
-    "+ continuous age",
-    "CSS"
-  ),
-
-  key_result(
-    cox_css_year,
-    "+ continuous surgery year",
-    "CSS"
-  ),
-
-  key_result(
-    cox_css_logca,
-    "Using log2-transformed CA19-9",
-    "CSS"
-  ),
-
-  key_result(
-    cox_css_logca_adj,
-    "Using log2-transformed CA19-9 + Adjuvant chemotherapy",
-    "CSS"
-  ),
-
-  key_result(
-    cox_css_noNAC,
-    "Excluding neoadjuvant chemotherapy",
-    "CSS"
-  ),
-
-  key_result(
-    cox_css_hba1c_replace,
-    "Replacing TAD with HbA1c",
-    "CSS",
-    "^HbA1c$"
+table2 <- bind_rows(lapply(seq_len(nrow(table2_specs)), function(i) {
+  variable <- table2_specs$Variable[i]
+  column <- table2_specs$Column[i]
+  available <- column %in% names(df)
+  if (available) {
+    available <- all(complete.cases(df[, c("os_time", "os_event", column)])) &&
+      length(unique(df[[column]])) == 2L
+  }
+  if (available) {
+    fit <- cox_fit("os_event", column)
+    u <- tidy_cox(fit)
+    if (nrow(u) != 1L) {
+      stop("Table 2 binary variable produced !=1 coefficient: ", column)
+    }
+    status <- "Calculated"
+    u_hr <- u$estimate
+    u_low <- u$conf.low
+    u_high <- u$conf.high
+    u_p <- u$p.value
+  } else {
+    status <- "INPUT_MISSING_OR_INVALID"
+    u_hr <- u_low <- u_high <- u_p <- NA_real_
+    warning("Table 2 univariable not calculated: ", variable,
+            ". Supply a validated 0/1 column (or specified raw measurement).")
+  }
+  primary_terms <- c(TAD = "TADTAD", stage = "stage>=IIb",
+                     margin = "marginR1", NLR = "NLR>=2.1",
+                     CA199 = "CA199>37")
+  target_term <- if (column %in% names(primary_terms)) {
+    unname(primary_terms[column])
+  } else {
+    "_not_in_primary_model_"
+  }
+  m <- multi_os[multi_os$term == target_term, , drop = FALSE]
+  if (column %in% c("TAD", "stage", "margin", "NLR", "CA199") &&
+      nrow(m) != 1) stop("Missing primary-model coefficient: ", column)
+  data.frame(
+    Variable = variable, Input_column = column,
+    Status = status,
+    Uni_HR = u_hr, Uni_CI_low = u_low,
+    Uni_CI_high = u_high, Uni_P = u_p,
+    Multi_HR = if (nrow(m)) m$estimate else NA_real_,
+    Multi_CI_low = if (nrow(m)) m$conf.low else NA_real_,
+    Multi_CI_high = if (nrow(m)) m$conf.high else NA_real_,
+    Multi_P = if (nrow(m)) m$p.value else NA_real_,
+    stringsAsFactors = FALSE
   )
+}))
+
+save_csv(table2, "Table_2_OS_Cox_univariable_multivariable.csv")
+cat("\nTable 2 analysis status:\n")
+print(table2[, c("Variable", "Status")], row.names = FALSE)
+
+save_csv(
+  multi_os %>% mutate(Endpoint = "OS", .before = 1),
+  "Primary_OS_Cox_model.csv"
+)
+save_csv(
+  tidy_cox(cox_css_primary) %>% mutate(Endpoint = "CSS", .before = 1),
+  "Primary_CSS_Cox_model.csv"
 )
 
-
-cat("\n================ SUPPLEMENTARY TABLE S4: OS ================\n")
-print(results_os)
-
-cat("\n================ SUPPLEMENTARY TABLE S3: CSS ================\n")
-print(results_css)
-
-# Separate files are written deliberately to prevent accidental
-# interchange of the S3 (CSS) and S4 (OS) results.
-write.csv(
-  results_css,
-  "supplementary_table_S3_css_sensitivity.csv",
-  row.names = FALSE
+# Proportional hazards (scaled Schoenfeld residuals)
+ph_results <- bind_rows(
+  ph_table(cox_os_primary, "Primary OS model"),
+  ph_table(cox_css_primary, "Primary CSS model")
 )
+print(ph_results)
+save_csv(ph_results, "Proportional_hazards_tests.csv")
 
-write.csv(
-  results_os,
-  "supplementary_table_S4_os_sensitivity.csv",
-  row.names = FALSE
-)
-
-# Combined results file.
-results <- bind_rows(results_os, results_css)
-
-write.csv(
-  results,
-  "survival_sensitivity_results_all.csv",
-  row.names = FALSE
-)
-
-
-# ============================================================
-# FOUR DIABETES PHENOTYPES
-#
-# Fig. 1c / Supplementary Table S5A
-#
-# Reference: no diabetes
-# ============================================================
-
-cox_os_dm4 <- coxph(
-  Surv(os_time, os_event) ~
-    dm4 + stage + margin + NLR + CA199,
+# Median follow-up (reverse Kaplan-Meier)
+reverse_km <- survfit(
+  Surv(os_time, 1 - os_event) ~ 1,
   data = df
 )
+fu <- summary(reverse_km)$table
+follow_up <- data.frame(
+  Method = "Reverse Kaplan-Meier",
+  Median = unname(fu["median"]),
+  CI_low = unname(fu["0.95LCL"]),
+  CI_high = unname(fu["0.95UCL"])
+)
+cat("Median follow-up:\n")
+print(follow_up)
+save_csv(follow_up, "Median_follow_up_reverse_KM.csv")
 
-cat(
-  "\n================ FOUR DIABETES PHENOTYPES ================\n"
+# ------------------------------------------------------------
+# Kaplan-Meier/log-rank statistics
+# ------------------------------------------------------------
+km_comparison <- function(endpoint, group, name) {
+  f <- as.formula(
+    paste0("Surv(os_time,", endpoint, ") ~ ", group)
+  )
+  x <- survdiff(f, data = df)
+  data.frame(
+    Figure = name,
+    Endpoint = endpoint_label[[endpoint]],
+    Groups = group,
+    Chi_square = unname(x$chisq),
+    df = length(x$n) - 1,
+    P_value = pchisq(
+      x$chisq, length(x$n) - 1,
+      lower.tail = FALSE
+    )
+  )
+}
+
+km_results <- bind_rows(
+  km_comparison("os_event", "TAD", "Fig. 1b"),
+  km_comparison("os_event", "dm4", "Fig. 1c"),
+  km_comparison("css_event", "TAD", "Supplementary Fig. S2")
+)
+save_csv(km_results, "Figure_1b-c_and_Supplementary_Figure_S2_logrank.csv")
+
+# ------------------------------------------------------------
+# Sensitivity models (Supplementary Tables S4 and S5)
+# ------------------------------------------------------------
+sensitivity_specs <- list(
+  "Primary multivariable model" = base_rhs,
+  "+ HbA1c" = paste(base_rhs, "+ HbA1c"),
+  "+ Adjuvant chemotherapy" =
+    paste(base_rhs, "+ adj_chemo"),
+  "+ continuous age" = paste(base_rhs, "+ age"),
+  "+ continuous surgery year" =
+    paste(base_rhs, "+ surgery_year"),
+  "Using log2-transformed CA19-9" =
+    "TAD + stage + margin + NLR + CA199_log2",
+  "Using log2-transformed CA19-9 + Adjuvant chemotherapy" =
+    "TAD + stage + margin + NLR + CA199_log2 + adj_chemo",
+  "Replacing TAD with HbA1c" =
+    paste("HbA1c +", base_without_tad)
 )
 
-print(tidy_cox(cox_os_dm4))
+run_sensitivities <- function(endpoint) {
+  bind_rows(lapply(names(sensitivity_specs), function(label) {
+    fit <- cox_fit(endpoint, sensitivity_specs[[label]])
+    term <- if (label == "Replacing TAD with HbA1c") {
+      "^HbA1c$"
+    } else {
+      "^TADTAD$"
+    }
+    model_result(fit, label, endpoint, term)
+  }))
+}
 
-# Reference HRs reported in the manuscript (no diabetes as reference):
-#
-# Stable diabetes:
-#   HR 0.81 (0.43-1.52), P = 0.504
-#
-# New-onset diabetes:
-#   HR 1.70 (1.08-2.69), P = 0.023
-#
-# Worsening diabetes:
-#   HR 1.86 (1.08-3.22), P = 0.026
+results_os <- run_sensitivities("os_event")
+results_css <- run_sensitivities("css_event")
 
-
-# ============================================================
-# DIABETES-ONLY ANALYSES
-#
-# n = 81
-# TAD = new-onset or worsening diabetes
-# Reference = long-standing stable diabetes
-#
-# Supplementary Table S5A
-# ============================================================
-
-df_dm <- df %>%
-  filter(!is.na(dm_compare))
-
-
-stopifnot(nrow(df_dm) == 81)
-
-stopifnot(
-  sum(df_dm$dm_compare == "Stable diabetes") == 17
+# OS only: continuous NLR + continuous CA19-9
+results_os <- bind_rows(
+  results_os,
+  model_result(
+    cox_fit(
+      "os_event",
+      "TAD + stage + margin + NLR_raw + CA199_log2"
+    ),
+    "Continuous NLR + log2(CA19-9)",
+    "os_event"
+  )
 )
 
+# OS sensitivity model adjusted for log2-transformed CD8+ density.
+# Manuscript estimate: HR 1.68 (95% CI 1.14–2.47), P = 0.009.
+cox_os_cd8 <- cox_fit(
+  "os_event", paste(base_rhs, "+ CD8_log2")
+)
+cd8_result <- model_result(
+  cox_os_cd8,
+  "+ log2(intratumoral CD8+ density)",
+  "os_event"
+)
+results_os <- bind_rows(results_os, cd8_result)
+save_csv(cd8_result, "Supplementary_Table_S5_CD8_adjusted_OS.csv")
+
+if (round(cd8_result$HR, 2) != 1.68 ||
+    round(cd8_result$CI_low, 2) != 1.14 ||
+    round(cd8_result$CI_high, 2) != 2.47 ||
+    round(cd8_result$P_value, 3) != 0.009) {
+  warning("CD8-adjusted OS differs from reference estimates.")
+}
+
+# Excluding neoadjuvant-treated patients
+df_noNAC <- df %>% filter(neoadj == "No")
+stopifnot(nrow(df_noNAC) == 144)
+
+results_os <- bind_rows(
+  results_os,
+  model_result(
+    cox_fit("os_event", base_rhs, df_noNAC),
+    "Excluding neoadjuvant chemotherapy",
+    "os_event"
+  )
+)
+results_css <- bind_rows(
+  results_css,
+  model_result(
+    cox_fit("css_event", base_rhs, df_noNAC),
+    "Excluding neoadjuvant chemotherapy",
+    "css_event"
+  )
+)
+
+# Classification sensitivity: exclude worsening diabetes
+# identified by treatment intensification alone (n = 11)
+df_no_treatment_only <- df %>%
+  filter(!(
+    dm_group_num == 3 &
+      coalesce(worsening_basis == 2L, FALSE)
+  ))
+stopifnot(nrow(df_no_treatment_only) == 151)
+
+results_os <- bind_rows(
+  results_os,
+  model_result(
+    cox_fit("os_event", base_rhs, df_no_treatment_only),
+    "Excluding treatment-only worsening",
+    "os_event"
+  )
+)
+
+# Body status sensitivity
+results_os <- bind_rows(
+  results_os,
+  model_result(
+    cox_fit(
+      "os_event",
+      paste(base_rhs, "+ BMI + SMI + albumin + ECOG_hi")
+    ),
+    "+ BMI, SMI, albumin and ECOG-PS",
+    "os_event"
+  )
+)
+
+# ------------------------------------------------------------
+# Diabetes-only models (TAD vs stable diabetes)
+# ------------------------------------------------------------
+df_dm <- df %>% filter(!is.na(dm_compare))
 stopifnot(
+  nrow(df_dm) == 81,
+  sum(df_dm$dm_compare == "Stable diabetes") == 17,
   sum(df_dm$dm_compare == "TAD") == 64
 )
 
+df_dm_no_treatment_only <- df_no_treatment_only %>%
+  filter(!is.na(dm_compare))
+stopifnot(nrow(df_dm_no_treatment_only) == 70)
+
+df_dm_stable_longitudinal <- df_dm %>%
+  filter(
+    dm_compare == "TAD" |
+      coalesce(stable_longitudinal_data == 1L, FALSE)
+  )
+stopifnot(nrow(df_dm_stable_longitudinal) == 72)
+
+diabetes_rhs <- "dm_compare + stage + margin + NLR + CA199"
+
+dm_specs <- list(
+  "Diabetes only: primary" =
+    list(rhs = diabetes_rhs, data = df_dm),
+  "Diabetes only: + HbA1c" =
+    list(rhs = paste(diabetes_rhs, "+ HbA1c"), data = df_dm),
+  "Diabetes only: reduced model" =
+    list(rhs = "dm_compare + stage + margin", data = df_dm),
+  "Diabetes only: excluding treatment-only worsening" =
+    list(rhs = diabetes_rhs, data = df_dm_no_treatment_only),
+  "Diabetes only: stable DM with longitudinal data" =
+    list(rhs = diabetes_rhs, data = df_dm_stable_longitudinal)
+)
+
+dm_results <- bind_rows(lapply(names(dm_specs), function(nm) {
+  s <- dm_specs[[nm]]
+  model_result(
+    cox_fit("os_event", s$rhs, s$data), nm,
+    "os_event", "^dm_compareTAD$"
+  )
+}))
+
+# Group sizes and events, including the reference group
+# (stable diabetes; n = 8 in the longitudinal-data model)
+dm_counts <- bind_rows(lapply(names(dm_specs), function(nm) {
+  group_counts(dm_specs[[nm]]$data, nm)
+}))
+print(dm_counts)
+
+# Include only the two diabetes-only classification sensitivities
+# listed in Supplementary Table S5; the other three belong to S6A.
+s5_dm_models <- c(
+  "Diabetes only: excluding treatment-only worsening",
+  "Diabetes only: stable DM with longitudinal data"
+)
+s5_dm <- dm_results %>% filter(Model %in% s5_dm_models)
+stopifnot(nrow(s5_dm) == 2L)
+results_os <- bind_rows(results_os, s5_dm)
+stopifnot(nrow(results_os) == 15L, nrow(results_css) == 9L)
+
+# S4 = CSS, S5 = OS
+save_csv(
+  results_css,
+  "Supplementary_Table_S4_CSS_sensitivity.csv"
+)
+save_csv(
+  results_os,
+  "Supplementary_Table_S5_OS_sensitivity.csv"
+)
+
+# ------------------------------------------------------------
+# Supplementary Table S6A: four categories and diabetes only
+# ------------------------------------------------------------
+# Four-category model (reference: no diabetes); also used for
+# the adjusted HRs annotated in Fig. 1c
+cox_dm4 <- cox_fit(
+  "os_event",
+  "dm4 + stage + margin + NLR + CA199"
+)
+fourcat <- tidy_cox(cox_dm4)
+fourcat <- fourcat[grepl("^dm4", fourcat$term), ]
+
+# Direct contrast: worsening vs stable diabetes
+b <- coef(cox_dm4)
+V <- vcov(cox_dm4)
+term_worse <- "dm4Worsening diabetes"
+term_stable <- "dm4Stable diabetes"
+delta <- b[term_worse] - b[term_stable]
+se_delta <- sqrt(
+  V[term_worse, term_worse] + V[term_stable, term_stable] -
+    2 * V[term_worse, term_stable]
+)
+fourcat_contrast <- data.frame(
+  Contrast = "Worsening vs stable diabetes",
+  HR = unname(exp(delta)),
+  CI_low = unname(exp(delta - qnorm(0.975) * se_delta)),
+  CI_high = unname(exp(delta + qnorm(0.975) * se_delta)),
+  P_value = unname(2 * pnorm(-abs(delta / se_delta)))
+)
+
+# Group counts and death counts shown in Table S6A
+fourcat_counts <- df %>%
+  group_by(Diabetes_phenotype = dm4) %>%
+  summarise(
+    N = n(),
+    Deaths = sum(os_event),
+    .groups = "drop"
+  )
 stopifnot(
-  sum(
-    df_dm$os_event[
-      df_dm$dm_compare == "Stable diabetes"
-    ]
-  ) == 12
+  identical(fourcat_counts$N, c(81L, 17L, 40L, 24L)),
+  identical(fourcat_counts$Deaths, c(56L, 12L, 33L, 19L))
 )
+save_csv(
+  fourcat_counts,
+  "Supplementary_Table_S6A_four_category_counts.csv"
+)
+
+save_csv(
+  fourcat,
+  "Supplementary_Table_S6A_four_category_model.csv"
+)
+save_csv(
+  fourcat_contrast,
+  "Supplementary_Table_S6A_worsening_vs_stable_contrast.csv"
+)
+save_csv(
+  dm_results,
+  "Supplementary_Table_S6A_diabetes_only_models.csv"
+)
+save_csv(
+  dm_counts,
+  "Supplementary_Table_S6A_diabetes_only_group_counts.csv"
+)
+
+# ------------------------------------------------------------
+# Supplementary Fig. S3: stage-specific models
+# ------------------------------------------------------------
+df_low <- df %>% filter(stage == "<=IIa")
+df_high <- df %>% filter(stage == ">=IIb")
 
 stopifnot(
-  sum(
-    df_dm$os_event[
-      df_dm$dm_compare == "TAD"
-    ]
-  ) == 52
+  nrow(df_low) == 43,
+  sum(df_low$os_event) == 24,
+  sum(df_low$css_event) == 20,
+  nrow(df_high) == 119,
+  sum(df_high$os_event) == 96,
+  sum(df_high$css_event) == 90
 )
 
-
-# Primary diabetes-only model
-
-cox_dm_primary <- coxph(
-  Surv(os_time, os_event) ~
-    dm_compare + stage + margin + NLR + CA199,
-  data = df_dm
+stage_rhs <- "TAD + margin + NLR + CA199"
+stage_results <- bind_rows(
+  model_result(
+    cox_fit("os_event", stage_rhs, df_low),
+    "Stage <=IIa", "os_event"
+  ),
+  model_result(
+    cox_fit("os_event", stage_rhs, df_high),
+    "Stage >=IIb", "os_event"
+  ),
+  model_result(
+    cox_fit("css_event", stage_rhs, df_low),
+    "Stage <=IIa", "css_event"
+  ),
+  model_result(
+    cox_fit("css_event", stage_rhs, df_high),
+    "Stage >=IIb", "css_event"
+  )
+)
+save_csv(
+  stage_results,
+  "Supplementary_Figure_S3_stage_specific_models.csv"
 )
 
-cat("\n-- Diabetes only: primary model --\n")
-print(tidy_cox(cox_dm_primary))
-
-# Reference result reported in the manuscript:
-# HR 2.34 (1.20-4.54), P = 0.012
-
-
-# + HbA1c
-
-cox_dm_hba1c <- coxph(
-  Surv(os_time, os_event) ~
-    dm_compare + stage + margin + NLR +
-    CA199 + HbA1c,
-  data = df_dm
+# ------------------------------------------------------------
+# Supplementary Table S6B: TAD-by-stage interaction
+# (Wald test of the interaction coefficient)
+# ------------------------------------------------------------
+interaction_rhs <- "TAD * stage + margin + NLR + CA199"
+interaction_results <- bind_rows(lapply(
+  c("os_event", "css_event"),
+  function(ep) {
+    fit <- cox_fit(ep, interaction_rhs)
+    x <- tidy_cox(fit)
+    x <- x[grepl("TAD.*:stage|stage.*:TAD", x$term), ]
+    if (nrow(x) != 1) {
+      stop("Missing TAD-by-stage interaction coefficient")
+    }
+    data.frame(
+      Endpoint = endpoint_label[[ep]],
+      Term = x$term,
+      N = fit$n,
+      Events = fit$nevent,
+      HR_ratio = x$estimate,
+      CI_low = x$conf.low,
+      CI_high = x$conf.high,
+      Wald_P = x$p.value
+    )
+  }
+))
+save_csv(
+  interaction_results,
+  "Supplementary_Table_S6B_TAD_by_stage_interaction_survival.csv"
 )
 
-cat("\n-- Diabetes only: + HbA1c --\n")
-print(tidy_cox(cox_dm_hba1c))
-
-# Reference result reported in the manuscript:
-# HR 2.51 (1.26-5.01), P = 0.009
-
-
-# Reduced sensitivity model:
-# stage + margin only
-
-cox_dm_reduced <- coxph(
-  Surv(os_time, os_event) ~
-    dm_compare + stage + margin,
-  data = df_dm
-)
-
-cat("\n-- Diabetes only: reduced model --\n")
-print(tidy_cox(cox_dm_reduced))
-
-# Reference result reported in the manuscript:
-# HR 2.02 (1.07-3.82), P = 0.031
-
-
-# ============================================================
-# STAGE-SPECIFIC ANALYSES
-#
-# Supplementary Fig. S2
-# ============================================================
-
-df_low <- df %>%
-  filter(stage == "<=IIa")
-
-df_high <- df %>%
-  filter(stage == ">=IIb")
-
-
-# Verify sample sizes and event counts reported in S2.
-
-stopifnot(nrow(df_low) == 43)
-stopifnot(sum(df_low$os_event) == 24)
-stopifnot(sum(df_low$css_event) == 20)
-
-stopifnot(nrow(df_high) == 119)
-stopifnot(sum(df_high$os_event) == 96)
-stopifnot(sum(df_high$css_event) == 90)
-
-
-# Stage <=IIa
-
-cox_os_low <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + margin + NLR + CA199,
-  data = df_low
-)
-
-cox_css_low <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + margin + NLR + CA199,
-  data = df_low
-)
-
-
-# Stage >=IIb
-
-cox_os_high <- coxph(
-  Surv(os_time, os_event) ~
-    TAD + margin + NLR + CA199,
-  data = df_high
-)
-
-cox_css_high <- coxph(
-  Surv(os_time, css_event) ~
-    TAD + margin + NLR + CA199,
-  data = df_high
-)
-
-
-cat("\n================ STAGE-SPECIFIC OS ================\n")
-
-cat("\n-- <=IIa --\n")
-print(extract_term(cox_os_low, "^TADTAD$"))
-
-cat("\n-- >=IIb --\n")
-print(extract_term(cox_os_high, "^TADTAD$"))
-
-
-cat("\n================ STAGE-SPECIFIC CSS ================\n")
-
-cat("\n-- <=IIa --\n")
-print(extract_term(cox_css_low, "^TADTAD$"))
-
-cat("\n-- >=IIb --\n")
-print(extract_term(cox_css_high, "^TADTAD$"))
-
-
-# ============================================================
-# TAD-BY-STAGE INTERACTIONS
-#
-# Supplementary Table S5B
-# Wald P value for the interaction coefficient
-# ============================================================
-
-cox_os_interaction <- coxph(
-  Surv(os_time, os_event) ~
-    TAD * stage + margin + NLR + CA199,
-  data = df
-)
-
-cox_css_interaction <- coxph(
-  Surv(os_time, css_event) ~
-    TAD * stage + margin + NLR + CA199,
-  data = df
-)
-
-
-os_int <- tidy_cox(cox_os_interaction) %>%
-  filter(grepl("TAD.*:stage|stage.*:TAD", term))
-
-css_int <- tidy_cox(cox_css_interaction) %>%
-  filter(grepl("TAD.*:stage|stage.*:TAD", term))
-
-
-cat("\n================ TAD x STAGE INTERACTION ================\n")
-
-cat("\n-- OS --\n")
-print(os_int)
-
-cat("\n-- CSS --\n")
-print(css_int)
-
-# Reference interaction P values reported in the manuscript:
-# OS:  0.200
-# CSS: 0.386
-
-
-# ============================================================
-# Session information
-# ============================================================
-
-sink("sessionInfo_survival.txt")
+# ------------------------------------------------------------
+sink(file.path(out_dir, "sessionInfo_survival.txt"))
 print(sessionInfo())
 sink()
 
-
-cat("\nAll survival analyses completed successfully.\n")
+cat("\nSurvival analyses completed.\n")
+print(stage_results)
+print(interaction_results)
