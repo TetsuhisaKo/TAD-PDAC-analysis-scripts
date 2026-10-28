@@ -1,152 +1,76 @@
-# TAD-PDAC analysis scripts
 
-Analysis scripts accompanying the manuscript:
+# TAD–PDAC analysis scripts
 
-**New-onset or worsening diabetes, survival, and intratumoral T-cell densities in resected pancreatic ductal adenocarcinoma**
+R and Python scripts accompanying the manuscript on new-onset or worsening diabetes, survival, and intratumoral T-cell densities in resected pancreatic ductal adenocarcinoma (PDAC).
 
-## Scope
+The analyses include 162 patients in the surgical cohort (64 TAD, 98 non-TAD), 36 patient-derived organoids (6 TAD, 30 non-TAD), and 163 TCGA-PAAD primary tumors. TAD denotes new-onset or worsening diabetes within three years before PDAC diagnosis.
 
-This repository contains the statistical and bioinformatic analysis scripts used for the manuscript and its Supplementary Information.
+## Contents
 
-Patient-level clinical data are not distributed because of participant privacy and ethical restrictions. Patient-derived organoid sequencing data are available through controlled access at the European Genome-phenome Archive:
+| Script | Analysis | Manuscript outputs |
+| --- | --- | --- |
+| `01_survival_analysis.R` | Cox models, survival comparisons, sensitivity and interaction analyses | Table 2; Fig. 1b–c; Supplementary Figs. S2–S3; Tables S4–S6A and survival rows of S6B |
+| `02_deseq2_differential_expression.R` | Organoid differential expression, PCA, platform sensitivity | Fig. 3a, 3c–d; Supplementary Fig. S5; Table S9A |
+| `03_preranked_gsea.R` | Hallmark and Reactome enrichment | Fig. 3b; Supplementary Tables S8A–S8B |
+| `04_secreted_factor_tpm.py` | TPM-based sensitivity analyses | Supplementary Table S9B |
+| `05_tcell_adjusted_models.R` | Adjusted T-cell density models and sensitivity analyses | Fig. 2c; T-cell rows of Supplementary Table S6B; Tables S6C, S7B–S7D |
+| `06_tcga_paad_analysis.R` | GDF15-related expression, tumor-purity adjustment, survival | Fig. 4c–e; Supplementary Table S11; Supplementary Fig. S6 |
+| `07_driver_gene_wgs_analysis.R` | Organoid WGS-derived driver alteration frequencies | Supplementary Fig. S4 |
 
-- RNA sequencing: **EGAS00001007212**
-- Whole-genome sequencing: **EGAS00001007211**
+Scripts generate numerical results and figure source data rather than final figure graphics.
 
-Public TCGA-PAAD transcriptomic and clinical data were obtained from the UCSC Xena GDC Hub. PanCanAtlas ABSOLUTE tumour-purity estimates were obtained from the Genomic Data Commons.
+## Requirements
 
-Clinicopathological comparisons and selected descriptive/immunohistochemical group comparisons were performed in **IBM SPSS Statistics version 29.0.1**. SPSS syntax is not included in this repository. The adjusted T-cell models and the other statistical/bioinformatic analyses described below are represented by executable R or Python scripts.
+- R with `readxl`, `dplyr`, `tibble`, `openxlsx`, `survival`, `broom`, `sandwich`, `msigdbr`, `DESeq2`, `apeglm`, and `clusterProfiler` (including `DOSE` and `fgsea`).
+- Python with `pandas`, `numpy`, `scipy`, and `openpyxl`.
+- MSigDB release **2025.1.Hs** for GSEA. Exact output may depend on package versions.
 
-## Repository structure
+## Input data
 
-```text
-TAD-PDAC-analysis-scripts/
-├── README.md
-├── DATA_DICTIONARY.md
-├── .gitignore
-├── 01_survival_analysis.R
-├── 02_deseq2_differential_expression.R
-├── 03_preranked_gsea.R
-├── 04_secreted_factor_tpm.py
-├── 05_tcell_adjusted_models.R
-├── 06_tcga_paad_analysis.R
-└── 07_driver_gene_wgs_analysis.R
+Run scripts from the repository root. File structures, column coding, and sample requirements are described in [`DATA_DICTIONARY.md`](DATA_DICTIONARY.md).
+
+| Local path | Scripts |
+| --- | --- |
+| `data/clinical_data.xlsx` | 01, 05 |
+| `data/count_matrix.xlsx` | 02 |
+| `data/organoid_expression_TPM.xlsx` | 04 |
+| `data/organoid_driver_alterations.xlsx` | 07 |
+| `data/TCGA/TCGA-PAAD.star_fpkm-uq.tsv.gz` | 06 |
+| `data/TCGA/TCGA-PAAD.clinical.tsv.gz` | 06 |
+| `data/TCGA/TCGA-PAAD.survival.tsv.gz` | 06 |
+| `data/TCGA/gencode.v36.annotation.gtf.gene.probemap` | 06 |
+| `data/TCGA/TCGA_mastercalls.abs_tables_JSedit.fixed.txt` | 06 |
+
+TCGA-PAAD data were obtained from the UCSC Xena GDC Hub and PanCanAtlas/Genomic Data Commons resources.
+
+## Execution
+
+```bash
+Rscript 01_survival_analysis.R
+Rscript 02_deseq2_differential_expression.R
+Rscript 03_preranked_gsea.R
+python 04_secreted_factor_tpm.py
+Rscript 05_tcell_adjusted_models.R
+Rscript 06_tcga_paad_analysis.R
+Rscript 07_driver_gene_wgs_analysis.R
 ```
 
-The patient-level clinical input file (`data/clinical_data.xlsx`) is intentionally not distributed.
+Run `02` before `03` and `04`: both downstream scripts use DESeq2 output. Script `07` optionally checks organoid sample IDs against metadata produced by `02`. Other scripts can be run independently with the corresponding data in place.
 
-## Active scripts
+Results are written under `results/`; software versions are recorded in the generated logs or manifests. The 13 Table 2 univariable analyses require the validated input fields listed in the data dictionary.
 
-| Script | Analysis | Manuscript mapping |
-|---|---|---|
-| `01_survival_analysis.R` | OS/CSS, primary Cox models, sensitivity models, four diabetes phenotypes, diabetes-only analyses, stage-stratified models, and TAD-by-stage interaction | Fig. 1; Table 2; Supplementary Figs. S1–S2; Supplementary Tables S3–S5 |
-| `02_deseq2_differential_expression.R` | Organoid DESeq2 differential expression, PCA, and sequencing-platform sensitivity | Fig. 3a, c, d; Supplementary Fig. S4; Supplementary Table S8A |
-| `03_preranked_gsea.R` | Hallmark and Reactome pre-ranked GSEA | Fig. 3b; Supplementary Table S7 |
-| `04_secreted_factor_tpm.py` | TPM-based sensitivity analysis of selected organoid genes | Supplementary Table S8B |
-| `05_tcell_adjusted_models.R` | Adjusted CD4/CD8/FOXP3 models, HC3 inference, bootstrap CIs, HbA1c and body-status sensitivities, four-phenotype analyses, and stage-interaction analyses | Fig. 2c; Supplementary Tables S5B–C and S6B–D |
-| `06_tcga_paad_analysis.R` | TCGA-PAAD GDF15/immune/CYT/DDIT3 analyses, purity adjustment, histology-restricted sensitivity, and OS | Fig. 4c–e; Supplementary Fig. S5; Supplementary Table S10 |
-| `07_driver_gene_wgs_analysis.R` | WGS-derived KRAS/TP53/CDKN2A/SMAD4 comparisons in organoids | Supplementary Fig. S3 |
+## Analysis conventions
 
-## Key reproducibility decisions
+- **Survival:** the primary Cox model includes TAD, pathologic stage, resection margin, categorized NLR, and categorized CA19-9. The OS sensitivity analyses also include log2-transformed intratumoral CD8 density.
+- **T-cell densities:** log-linear regression with HC3 robust inference and BH adjustment across the three primary markers (CD4, CD8, FOXP3).
+- **Organoid RNA-seq:** DESeq2 primary design `~ DM_group`; apeglm-shrunken log2 fold changes with unshrunken Wald-test P values.
+- **GSEA:** `sign(shrunken log2FC) × −log10(nominal P)`; MSigDB 2025.1.Hs; BH-adjusted P <0.25 for Hallmark (S8A) and <0.05 for Reactome (S8B).
+- **TPM:** two-sided Mann–Whitney U tests without multiplicity adjustment; supplementary sensitivity results for Fig. 3d genes.
+- **Organoid driver genes:** two-sided Fisher exact tests of pre-derived alteration calls; no raw WGS processing.
+- **TCGA-PAAD:** GDF15-related transcriptomic analyses and ABSOLUTE purity sensitivity. The supplied expression matrix is already log2-transformed and must not be transformed again.
 
-### Survival analyses
+## Data availability
 
-The primary multivariable survival model includes:
+Clinical patient-level data are not publicly distributed for privacy and ethics reasons. Organoid RNA-seq and whole-genome sequencing data are available under controlled access at the European Genome-phenome Archive (EGA): `EGAS00001007212` and `EGAS00001007211`, respectively.
 
-`TAD + pathologic stage + resection margin status + dichotomised NLR + dichotomised CA19-9`
-
-with NLR dichotomised at the cohort median (2.1) and CA19-9 dichotomised at 37 U/mL.
-
-Sensitivity analyses include:
-
-- additional adjustment for continuous preoperative HbA1c;
-- replacement of TAD with continuous HbA1c;
-- additional adjustment for adjuvant chemotherapy;
-- additional adjustment for continuous age;
-- additional adjustment for continuous surgery year;
-- replacement of dichotomised CA19-9 with `log2(CA19-9)`;
-- `log2(CA19-9)` plus adjuvant chemotherapy;
-- exclusion of patients who received neoadjuvant chemotherapy;
-- classification-restricted analyses excluding treatment-only worsening diabetes;
-- diabetes-only classification sensitivities;
-- additional adjustment for BMI, SMI, serum albumin and ECOG-PS.
-
-A further **OS-only** sensitivity model treats both NLR and CA19-9 as continuous variables:
-
-`TAD + pathologic stage + resection margin status + continuous NLR + log2(CA19-9)`
-
-The TAD estimate from this model is:
-
-**HR 1.93 (95% CI 1.31–2.85), P = 0.001.**
-
-This model corresponds to **Supplementary Table S4 (overall survival)** and is **not included in Supplementary Table S3 (cancer-specific survival)**.
-
-To reduce the risk of mixing endpoints, `01_survival_analysis.R` writes separate output files:
-
-- `supplementary_table_S3_css_sensitivity.csv`
-- `supplementary_table_S4_os_sensitivity.csv`
-
-The TAD-by-stage interaction P values are taken from the **Wald test for the interaction coefficient**. The script also checks the stage-specific sample sizes and event counts reported in Supplementary Fig. S2.
-
-### T-cell models
-
-The main adjusted T-cell models use log-transformed cell density and adjust for:
-
-`TAD + age + pathologic stage + log2(CA19-9) + continuous NLR + neoadjuvant chemotherapy`
-
-HC3 heteroscedasticity-robust standard errors are used. Adjusted geometric-mean ratios with 95% confidence intervals and nominal P values are reported for CD4+, CD8+ and FOXP3+ densities; Benjamini–Hochberg-adjusted q values across the three markers are additionally reported as a multiplicity assessment.
-
-Percentile bootstrap confidence intervals use 2,000 patient-level resamples. Supporting four-category T-cell analyses use patients without diabetes as the reference group.
-
-### Organoid RNA-seq
-
-The primary DESeq2 design is `~ DM_group`, with non-TAD as the reference group. Genes with row-summed raw counts `<=10` are excluded. Log2 fold changes are shrunken using `apeglm`. Differential expression is defined by BH-adjusted `P < 0.05`, with no fold-change threshold.
-
-The sequencing-platform sensitivity model uses:
-
-`~ platform + DM_group`
-
-PCA uses variance-stabilised counts.
-
-### GSEA
-
-Pre-ranked GSEA uses:
-
-`sign(apeglm-shrunken log2FC) * -log10(nominal DESeq2 P value)`
-
-Ties are ordered deterministically. Hallmark and Reactome collections are evaluated with gene-set sizes of 15–500 and random seed 42. The prespecified enrichment threshold is `q < 0.25`.
-
-### TPM sensitivity analyses
-
-TPM-based comparisons use `log2(TPM + 1)` and two-sided Mann–Whitney U tests. Because `log2(TPM + 1)` is monotonic, the transformation does not change the rank ordering.
-
-### TCGA-PAAD
-
-The TCGA workflow:
-
-- restricts samples to primary-tumour `-01A` aliquots;
-- excludes `_PAR_Y` records before removing Ensembl version suffixes;
-- maps genes using GENCODE v36;
-- uses the Xena FPKM-UQ expression scale as supplied by the selected input matrix, without an additional transformation;
-- evaluates GDF15 as median-dichotomised and continuous;
-- evaluates CD8A, GZMA, GZMB, PRF1, CYT and DDIT3;
-- applies BH correction to the prespecified outcome families;
-- adjusts partial Spearman correlations for ABSOLUTE tumour purity;
-- uses Fisher-z confidence intervals with standard error `1 / sqrt(n - k - 3)`;
-- includes a histology-restricted sensitivity analysis.
-
-TCGA-PAAD lacks the longitudinal glycaemic and treatment information required to define TAD and is therefore used as an independent transcriptomic reference rather than as external validation of the TAD classification.
-
-## Software
-
-The manuscript reports:
-
-- R 4.3.3
-- Python 3.10.12
-- IBM SPSS Statistics 29.0.1
-
-Individual scripts record package/session information where applicable.
-
-## Code availability
-
-Analysis scripts used in this study are publicly available in this repository. Patient-level clinical data are not included because of participant privacy and ethical restrictions.
+Restricted-data analyses require authorized access to the corresponding inputs. Stage IV-adjusted DESeq2/GSEA analyses (Supplementary Table S8C) are not included because donor-level stage annotations are unavailable for public release.
