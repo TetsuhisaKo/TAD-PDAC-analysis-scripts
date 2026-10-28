@@ -1,22 +1,15 @@
-# Patient-level / controlled-access data
-data/
 
-# Spreadsheets and generated tabular outputs
-*.xlsx
-*.xls
-*.csv
+# Non-public clinical and organoid inputs and analysis outputs
+/data/
+/results/
 
-# Generated analysis outputs
-results/
-
-# R workspace/history
+# Local environments and temporary files
 .Rhistory
 .RData
-.Ruserdata
-
-# Session/output files
-sessionInfo*.txt
-
-# OS/editor metadata
+.Rproj.user/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.ipynb_checkpoints/
 .DS_Store
-Thumbs.db
