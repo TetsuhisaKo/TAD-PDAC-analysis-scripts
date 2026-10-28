@@ -1,24 +1,21 @@
+
 #!/usr/bin/env Rscript
 # ============================================================
 # 07_driver_gene_wgs_analysis.R
 #
-# Major PDAC driver-gene alterations in patient-derived
-# organoids according to TAD status.
+# Supplementary Fig. S4:
+# KRAS / TP53 / CDKN2A / SMAD4 alterations
+# Patient-derived organoids: TAD n=6, non-TAD n=30
 #
-# Computes the statistics underlying Supplementary Fig. S3.
-# This script outputs test results; final figure assembly is performed separately.
-#
-# Fisher exact-test P values are unadjusted.
-#
-# Reference results reported in the manuscript:
-#   non-TAD n=30; TAD n=6
-#   KRAS    30/30 vs 6/6   (100% vs 100%), P=1.000
-#   TP53    26/30 vs 4/6   (87%  vs 67%),  P=0.256
-#   CDKN2A  23/30 vs 3/6   (77%  vs 50%),  P=0.317
-#   SMAD4   21/30 vs 2/6   (70%  vs 33%),  P=0.161
-#
-# Input contains pre-derived gene-level 0/1 alteration calls
-# from WGS. This script does not process raw WGS reads.
+# Fisher exact tests (two-sided) without multiplicity
+# adjustment. Input consists of pre-derived WGS alteration
+# calls (0/1 per gene, "_any" = any qualifying event as
+# defined in the Supplementary Fig. S4 legend):
+#   KRAS    mutation
+#   TP53    mutation, heterozygous deletion or CN-LOH/UPD
+#   CDKN2A  mutation or homozygous deletion
+#   SMAD4   mutation, homozygous or heterozygous deletion
+# This script does not process raw WGS reads.
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -27,21 +24,55 @@ suppressPackageStartupMessages({
 })
 
 in_file <- "data/organoid_driver_alterations.xlsx"
+meta_file <- "results/organoid_RNAseq/organoid_sample_metadata.csv"
 out_dir <- "results/organoid_driver_genes"
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-stopifnot(file.exists(in_file))
+
+dir.create(
+  out_dir,
+  recursive = TRUE,
+  showWarnings = FALSE
+)
+
+if (!file.exists(in_file)) {
+  stop("Missing controlled-access WGS calls: ", in_file)
+}
 
 big4 <- read_excel(in_file)
 
-required <- c(
-  "SampleID",
-  "KRAS_any", "TP53_any", "CDKN2A_any", "SMAD4_any"
-)
+genes <- c("KRAS", "TP53", "CDKN2A", "SMAD4")
+call_cols <- paste0(genes, "_any")
+
+required <- c("SampleID", call_cols)
 
 missing <- setdiff(required, names(big4))
+if (length(missing)) {
+  stop("Missing columns: ", paste(missing, collapse = ", "))
+}
 
-if (length(missing) > 0) {
-  stop("Missing required column(s): ", paste(missing, collapse = ", "))
+# Validate values as binary 0/1 before converting to integer.
+# This avoids silently truncating invalid values such as 0.5.
+for (col in call_cols) {
+  x <- big4[[col]]
+  if (is.character(x)) {
+    x <- trimws(toupper(x))
+    x[x %in% c("TRUE", "YES")] <- "1"
+    x[x %in% c("FALSE", "NO")] <- "0"
+  }
+
+  x_num <- suppressWarnings(as.numeric(x))
+
+  if (
+    anyNA(x_num) ||
+    any(!is.finite(x_num)) ||
+    !all(x_num %in% c(0, 1))
+  ) {
+    stop(
+      "Alteration calls must be non-missing binary ",
+      "0/1 values for ", col
+    )
+  }
+
+  big4[[col]] <- as.integer(x_num)
 }
 
 tad_cases <- c(
@@ -51,65 +82,54 @@ tad_cases <- c(
 
 big4 <- big4 %>%
   mutate(
+    SampleID = trimws(as.character(SampleID)),
     DM_group = factor(
       ifelse(SampleID %in% tad_cases, "TAD", "non-TAD"),
       levels = c("non-TAD", "TAD")
     )
   )
 
-stopifnot(nrow(big4) == 36)
-stopifnot(sum(big4$DM_group == "TAD") == 6)
-stopifnot(sum(big4$DM_group == "non-TAD") == 30)
+stopifnot(
+  nrow(big4) == 36,
+  !anyDuplicated(big4$SampleID),
+  all(tad_cases %in% big4$SampleID),
+  sum(big4$DM_group == "TAD") == 6,
+  sum(big4$DM_group == "non-TAD") == 30
+)
 
-genes <- c("KRAS", "TP53", "CDKN2A", "SMAD4")
+# Cross-check organoids against the RNA-seq sample metadata
+if (file.exists(meta_file)) {
+  meta <- read.csv(meta_file, stringsAsFactors = FALSE)
+  if (!setequal(meta$case, big4$SampleID)) {
+    stop("Organoids differ from the RNA-seq sample metadata.")
+  }
+} else {
+  warning(meta_file, " not found; sample cross-check skipped.")
+}
 
 results <- bind_rows(
   lapply(genes, function(g) {
-
     col <- paste0(g, "_any")
 
-    if (!all(na.omit(big4[[col]]) %in% c(0, 1))) {
-      stop(col, " must contain only 0/1 (or NA) calls.")
-    }
-
     tab <- table(
-      factor(big4$DM_group, levels = c("non-TAD", "TAD")),
+      big4$DM_group,
       factor(big4[[col]], levels = c(0, 1))
     )
+    stopifnot(sum(tab) == sum(!is.na(big4[[col]])))
 
     ft <- fisher.test(tab)
 
+    non <- big4[[col]][big4$DM_group == "non-TAD"]
+    tad <- big4[[col]][big4$DM_group == "TAD"]
+
     data.frame(
       Gene = g,
-
-      Non_TAD_n = sum(
-        big4$DM_group == "non-TAD" & !is.na(big4[[col]])
-      ),
-
-      TAD_n = sum(
-        big4$DM_group == "TAD" & !is.na(big4[[col]])
-      ),
-
-      Non_TAD_altered_n = sum(
-        big4$DM_group == "non-TAD" & big4[[col]] == 1,
-        na.rm = TRUE
-      ),
-
-      TAD_altered_n = sum(
-        big4$DM_group == "TAD" & big4[[col]] == 1,
-        na.rm = TRUE
-      ),
-
-      Non_TAD_percent = mean(
-        big4[[col]][big4$DM_group == "non-TAD"],
-        na.rm = TRUE
-      ) * 100,
-
-      TAD_percent = mean(
-        big4[[col]][big4$DM_group == "TAD"],
-        na.rm = TRUE
-      ) * 100,
-
+      Non_TAD_n = sum(!is.na(non)),
+      TAD_n = sum(!is.na(tad)),
+      Non_TAD_altered_n = sum(non == 1, na.rm = TRUE),
+      TAD_altered_n = sum(tad == 1, na.rm = TRUE),
+      Non_TAD_percent = mean(non, na.rm = TRUE) * 100,
+      TAD_percent = mean(tad, na.rm = TRUE) * 100,
       P_value = ft$p.value,
       Multiple_testing_adjustment = "None; exploratory",
       stringsAsFactors = FALSE
@@ -121,10 +141,16 @@ print(results)
 
 write.csv(
   results,
-  file.path(out_dir, "Supplementary_Figure_S3_driver_gene_statistics.csv"),
+  file.path(
+    out_dir,
+    "Supplementary_Figure_S4_driver_gene_statistics.csv"
+  ),
   row.names = FALSE
 )
 
 sink(file.path(out_dir, "sessionInfo_driver_genes.txt"))
-sessionInfo()
+print(sessionInfo())
 sink()
+
+cat("\nDriver-gene WGS analysis completed.\n")
+
