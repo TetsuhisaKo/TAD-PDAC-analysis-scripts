@@ -1,37 +1,26 @@
+
+#!/usr/bin/env Rscript
 # ============================================================
 # 05_tcell_adjusted_models.R
 #
-# Adjusted intratumoral T-cell-density analyses.
+# Outputs (results/tcell_models/):
+#   Fig. 2c           Adjusted T-cell density ratios
+#                     (values in Supplementary Table S7B file)
+#   Suppl. Table S6B  TAD-by-stage interactions, T-cell rows
+#                     (OS/CSS rows: 01_survival_analysis.R)
+#   Suppl. Table S6C  Four diabetes phenotypes
+#   Suppl. Table S7B  Primary HC3 models and bootstrap CIs
+#   Suppl. Table S7C  HbA1c sensitivity
+#   Suppl. Table S7D  Body-status sensitivity
 #
-# Computes the statistics underlying:
-#   Fig. 2c
-#     adjusted geometric-mean ratios for CD4/CD8/FOXP3
-#   Supplementary Table S6B
-#     primary HC3 models + 2,000-resample bootstrap CIs
-#   Supplementary Table S6C
-#     additional adjustment for continuous HbA1c
-#   Supplementary Table S6D
-#     additional adjustment for BMI, SMI, serum albumin and ECOG-PS
-#   Supplementary Table S5C1
-#     descriptive and adjusted four-diabetes-phenotype analyses
-#   Supplementary Table S5B
-#     TAD-by-stage interaction for CD4/CD8/FOXP3
+# Selected manuscript estimates are checked with warnings.
 #
-# This script outputs model results; final figure assembly is performed separately.
-# Unadjusted descriptive/IHC comparisons performed in SPSS are
-# are not reproduced by this R script.
+# Statistical model:
+# log(density) ~ TAD + age + stage +
+#   log2(CA19-9) + continuous NLR + neoadjuvant chemotherapy
 #
-# Primary model:
-#   log(marker density) ~
-#     TAD + age + pathologic stage + log2(CA19-9)
-#     + continuous NLR + neoadjuvant chemotherapy
-#
-# HC3 heteroscedasticity-robust covariance is used.
-# Robust Wald z inference reproduces the manuscript analysis.
-# BH correction is applied across the three T-cell markers:
-# CD4, CD8, FOXP3.
-# Supporting four-category analyses are not included in this
-# Benjamini-Hochberg correction.
+# HC3 robust Wald z inference
+# BH adjustment across CD4, CD8 and FOXP3
 # ============================================================
 
 suppressPackageStartupMessages({
@@ -42,8 +31,11 @@ suppressPackageStartupMessages({
 
 in_file <- "data/clinical_data.xlsx"
 out_dir <- "results/tcell_models"
-dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-stopifnot(file.exists(in_file))
+dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
+
+if (!file.exists(in_file)) {
+  stop("Missing clinical data: ", in_file)
+}
 
 raw <- read_excel(in_file, sheet = 1)
 
@@ -55,65 +47,61 @@ required <- c(
 )
 
 missing <- setdiff(required, names(raw))
-if (length(missing) > 0) {
-  stop("Missing required column(s): ", paste(missing, collapse = ", "))
+if (length(missing)) {
+  stop("Missing clinical columns: ", paste(missing, collapse = ", "))
 }
+
+# Category labels match 01_survival_analysis.R
+dm_labels <- c(
+  "No diabetes", "Stable diabetes",
+  "New-onset diabetes", "Worsening diabetes"
+)
 
 dat <- raw %>%
   transmute(
     TAD = as.numeric(TAD),
-
+    dm_group_num = as.integer(dm_group),
     dm_group = factor(
-      as.integer(dm_group),
-      levels = c(0, 1, 2, 3),
-      labels = c(
-        "No diabetes",
-        "Long-standing stable",
-        "New-onset",
-        "Worsening"
-      )
+      dm_group_num,
+      levels = 0:3,
+      labels = dm_labels
     ),
-
     age = as.numeric(age),
     stage = as.numeric(stage),
     CA199_raw = as.numeric(CA199_raw),
     NLR_raw = as.numeric(NLR_raw),
     neoadj = as.numeric(neoadj),
     HbA1c = as.numeric(HbA1c),
-
     BMI = as.numeric(BMI),
     SMI = as.numeric(SMI),
     albumin = as.numeric(albumin),
     ECOG_PS = as.numeric(ECOG_PS),
-
     CD4 = as.numeric(CD4),
     CD8 = as.numeric(CD8),
     FOXP3 = as.numeric(FOXP3)
   )
 
-primary_model_cols <- c(
-  "TAD", "age", "stage", "CA199_raw",
-  "NLR_raw", "neoadj", "CD4", "CD8", "FOXP3"
+stopifnot(
+  nrow(dat) == 162,
+  all(complete.cases(dat)),
+  sum(dat$TAD == 0) == 98,
+  sum(dat$TAD == 1) == 64,
+  identical(
+    as.integer(table(dat$dm_group_num)),
+    c(81L, 17L, 40L, 24L)
+  ),
+  all(dat$TAD == as.numeric(dat$dm_group_num %in% c(2, 3))),
+  all(dat$stage %in% c(0, 1)),
+  all(dat$neoadj %in% c(0, 1)),
+  all(dat$CA199_raw > 0),
+  all(dat$CD4 > 0),
+  all(dat$CD8 > 0),
+  all(dat$FOXP3 > 0)
 )
-
-body_status_cols <- c(
-  "BMI", "SMI", "albumin", "ECOG_PS"
-)
-
-stopifnot(nrow(dat) == 162)
-stopifnot(all(complete.cases(dat[primary_model_cols])))
-stopifnot(all(complete.cases(dat[body_status_cols])))
-stopifnot(sum(dat$TAD == 0) == 98)
-stopifnot(sum(dat$TAD == 1) == 64)
-stopifnot(all(dat$CA199_raw > 0, na.rm = TRUE))
-stopifnot(all(dat$CD4 > 0, na.rm = TRUE))
-stopifnot(all(dat$CD8 > 0, na.rm = TRUE))
-stopifnot(all(dat$FOXP3 > 0, na.rm = TRUE))
 
 dat$log2_CA199 <- log2(dat$CA199_raw)
 dat$ECOG_hi <- as.integer(dat$ECOG_PS >= 1)
 
-# Validate ECOG-PS distribution used in the analysis.
 stopifnot(
   sum(dat$TAD == 0 & dat$ECOG_hi == 0) == 82,
   sum(dat$TAD == 0 & dat$ECOG_hi == 1) == 16,
@@ -121,151 +109,145 @@ stopifnot(
   sum(dat$TAD == 1 & dat$ECOG_hi == 1) == 11
 )
 
-# ------------------------------------------------------------
-# HC3 robust Wald helper
-# ------------------------------------------------------------
+markers <- c("CD4", "CD8", "FOXP3")
+zcrit <- qnorm(0.975)
 
-hc3_wald <- function(fit) {
+# ------------------------------------------------------------
+# Helper functions
+# ------------------------------------------------------------
+# HC3 robust inference
+hc3_table <- function(fit) {
   V <- vcovHC(fit, type = "HC3")
   b <- coef(fit)
   se <- sqrt(diag(V))
-  z <- b / se
-  p <- 2 * pnorm(-abs(z))
 
   data.frame(
     term = names(b),
     estimate = unname(b),
     robust_se = unname(se),
-    z = unname(z),
-    p = unname(p),
+    z = unname(b / se),
+    p = unname(2 * pnorm(-abs(b / se))),
     stringsAsFactors = FALSE
   )
 }
 
-fit_marker_hc3 <- function(
-    marker,
-    add_hba1c = FALSE,
-    add_body_status = FALSE,
-    interaction = FALSE
-) {
-
-  if (add_hba1c && add_body_status) {
-    stop("HbA1c and body-status sensitivity flags should be run separately.")
-  }
-
-  if (interaction) {
-    rhs <- c(
-      "TAD * stage",
-      "age",
-      "log2_CA199",
-      "NLR_raw",
-      "neoadj"
-    )
-  } else {
-    rhs <- c(
-      "TAD",
-      "age",
-      "stage",
-      "log2_CA199",
-      "NLR_raw",
-      "neoadj"
-    )
-  }
-
-  if (add_hba1c) {
-    rhs <- c(rhs, "HbA1c")
-  }
-
-  if (add_body_status) {
-    rhs <- c(rhs, "BMI", "SMI", "albumin", "ECOG_hi")
-  }
-
-  f <- as.formula(
-    paste0("log(", marker, ") ~ ", paste(rhs, collapse = " + "))
+model_formula <- function(marker, type = "primary") {
+  rhs <- switch(
+    type,
+    primary =
+      "TAD + age + stage + log2_CA199 + NLR_raw + neoadj",
+    hba1c =
+      "TAD + age + stage + log2_CA199 + NLR_raw + neoadj + HbA1c",
+    body =
+      paste(
+        "TAD + age + stage + log2_CA199 + NLR_raw + neoadj",
+        "+ BMI + SMI + albumin + ECOG_hi"
+      ),
+    fourcat =
+      "dm_group + age + stage + log2_CA199 + NLR_raw + neoadj",
+    interaction =
+      "TAD * stage + age + log2_CA199 + NLR_raw + neoadj",
+    stop("Unknown model type")
   )
 
-  fit <- lm(f, data = dat)
-  tab <- hc3_wald(fit)
-
-  list(fit = fit, table = tab)
+  as.formula(
+    paste0("log(", marker, ") ~ ", rhs)
+  )
 }
 
-extract_tad <- function(
-    marker,
-    add_hba1c = FALSE,
-    add_body_status = FALSE
-) {
-  z <- fit_marker_hc3(
-    marker,
-    add_hba1c = add_hba1c,
-    add_body_status = add_body_status
-  )
-  row <- z$table[z$table$term == "TAD", , drop = FALSE]
+fit_model <- function(marker, type = "primary", data = dat) {
+  lm(model_formula(marker, type), data = data)
+}
 
-  if (nrow(row) != 1) {
-    stop("Could not identify TAD coefficient for ", marker)
+extract_tad <- function(marker, type) {
+  fit <- fit_model(marker, type)
+  tab <- hc3_table(fit)
+  x <- tab[tab$term == "TAD", , drop = FALSE]
+
+  if (nrow(x) != 1) {
+    stop("TAD coefficient not found: ", marker)
   }
-
-  zcrit <- qnorm(0.975)
 
   data.frame(
     Marker = marker,
-    Ratio = exp(row$estimate),
-    Lower95 = exp(row$estimate - zcrit * row$robust_se),
-    Upper95 = exp(row$estimate + zcrit * row$robust_se),
-    P_value = row$p,
+    Ratio = exp(x$estimate),
+    Lower95 = exp(x$estimate - zcrit * x$robust_se),
+    Upper95 = exp(x$estimate + zcrit * x$robust_se),
+    P_value = x$p,
     stringsAsFactors = FALSE
   )
 }
 
-primary_markers <- c("CD4", "CD8", "FOXP3")
+run_tad_models <- function(type) {
+  bind_rows(
+    lapply(markers, extract_tad, type = type)
+  ) %>%
+    mutate(q_value = p.adjust(P_value, method = "BH"))
+}
 
-primary <- bind_rows(
-  lapply(primary_markers, extract_tad, add_hba1c = FALSE)
-) %>%
-  mutate(q_value = p.adjust(P_value, method = "BH"))
+# Compare ratios with manuscript values; warn on mismatch
+check_reference <- function(results, reference, tol, label) {
+  observed <- setNames(results$Ratio, results$Marker)
+  diff <- abs(observed[names(reference)] - reference)
+  if (any(!is.finite(diff)) || any(diff >= tol)) {
+    warning(
+      label, ": ratios differ from manuscript values (",
+      paste(
+        sprintf("%s %.4f vs %.4f", names(reference),
+                observed[names(reference)], reference),
+        collapse = "; "
+      ),
+      ")",
+      call. = FALSE
+    )
+  }
+}
 
 # ------------------------------------------------------------
-# 2,000 patient-level bootstrap percentile confidence intervals
-# Fixed seed ensures reproducibility.
+# Primary models (Fig. 2c, Supplementary Table S7B)
 # ------------------------------------------------------------
+primary <- run_tad_models("primary")
 
+# Values reported to two decimals in Table S7B / Fig. 2c
+check_reference(
+  primary,
+  c(CD4 = 0.74, CD8 = 0.79, FOXP3 = 0.80),
+  tol = 0.005,
+  label = "Table S7B primary model"
+)
+
+# 2000 patient-level percentile bootstrap resamples.
+# The seed is set once; markers are resampled in the order
+# CD4, CD8, FOXP3, so each marker's CI depends on that order.
 BOOT_B <- 2000L
 BOOT_SEED <- 20260803L
 set.seed(BOOT_SEED)
 
 bootstrap_marker <- function(marker) {
-  n <- nrow(dat)
   vals <- rep(NA_real_, BOOT_B)
+  f <- model_formula(marker, "primary")
 
-  f <- as.formula(
-    paste0(
-      "log(", marker, ") ~ ",
-      "TAD + age + stage + log2_CA199 + NLR_raw + neoadj"
+  for (i in seq_len(BOOT_B)) {
+    idx <- sample.int(
+      nrow(dat), nrow(dat), replace = TRUE
     )
-  )
 
-  for (b in seq_len(BOOT_B)) {
-    idx <- sample.int(n, size = n, replace = TRUE)
-
-    fit_b <- try(
+    fit <- try(
       lm(f, data = dat[idx, , drop = FALSE]),
       silent = TRUE
     )
 
-    if (!inherits(fit_b, "try-error")) {
-      cf <- coef(fit_b)
-
-      if ("TAD" %in% names(cf) && is.finite(cf["TAD"])) {
-        vals[b] <- exp(cf["TAD"])
+    if (!inherits(fit, "try-error")) {
+      b <- coef(fit)
+      if ("TAD" %in% names(b) && is.finite(b["TAD"])) {
+        vals[i] <- exp(b["TAD"])
       }
     }
   }
 
   vals <- vals[is.finite(vals)]
-
   if (length(vals) < 0.95 * BOOT_B) {
-    warning("More than 5% of bootstrap fits failed for ", marker)
+    warning("Bootstrap failures exceeded 5% for ", marker)
   }
 
   ci <- quantile(
@@ -282,199 +264,91 @@ bootstrap_marker <- function(marker) {
     Bootstrap_B_successful = length(vals),
     Bootstrap_seed = BOOT_SEED,
     Bootstrap_Lower95 = ci[1],
-    Bootstrap_Upper95 = ci[2],
-    stringsAsFactors = FALSE
+    Bootstrap_Upper95 = ci[2]
   )
 }
 
 bootstrap_results <- bind_rows(
-  lapply(primary_markers, bootstrap_marker)
+  lapply(markers, bootstrap_marker)
 )
 
-primary <- primary %>%
-  left_join(bootstrap_results, by = "Marker")
+primary <- left_join(
+  primary, bootstrap_results,
+  by = "Marker"
+)
 
 write.csv(
   primary,
-  file.path(out_dir, "Supplementary_Table_S6B_primary_HC3_and_bootstrap.csv"),
+  file.path(
+    out_dir,
+    "Supplementary_Table_S7B_primary_HC3_and_bootstrap.csv"
+  ),
   row.names = FALSE
 )
 
-cat("\nPrimary adjusted immune models:\n")
-print(primary)
-
-# Reference estimates reported in the manuscript:
-# CD4   0.74 (0.58-0.95), P=0.016, q=0.049
-#        bootstrap 0.59-0.93
-# CD8   0.79 (0.63-0.99), P=0.037, q=0.055
-#        bootstrap 0.63-0.99
-# FOXP3 0.80 (0.63-1.03), P=0.079, q=0.079
-#        bootstrap 0.63-1.02
-
 # ------------------------------------------------------------
-# HbA1c-adjusted sensitivity
+# Supplementary Table S7C: HbA1c adjustment
 # ------------------------------------------------------------
-
-if (!all(complete.cases(dat[, c(
-  "TAD", "age", "stage", "log2_CA199",
-  "NLR_raw", "neoadj", "HbA1c",
-  "CD4", "CD8", "FOXP3"
-)]))) {
-  warning("HbA1c sensitivity models use complete cases.")
-}
-
-hba1c <- bind_rows(
-  lapply(primary_markers, extract_tad, add_hba1c = TRUE)
-) %>%
-  mutate(q_value = p.adjust(P_value, method = "BH"))
-
+hba1c <- run_tad_models("hba1c")
 write.csv(
   hba1c,
-  file.path(out_dir, "Supplementary_Table_S6C_HbA1c_adjusted.csv"),
+  file.path(
+    out_dir,
+    "Supplementary_Table_S7C_HbA1c_adjusted.csv"
+  ),
   row.names = FALSE
 )
 
-cat("\nHbA1c-adjusted immune models:\n")
-print(hba1c)
-
-# Reference estimates reported in the manuscript:
-# CD4   0.73 (0.52-1.02), P=0.062, q=0.094
-# CD8   0.69 (0.51-0.93), P=0.014, q=0.042
-# FOXP3 0.78 (0.55-1.12), P=0.177, q=0.177
-
-
 # ------------------------------------------------------------
-# Additional adjustment for BMI, SMI, serum albumin and ECOG-PS
-# Supplementary Table S6D
+# Supplementary Table S7D: body-status sensitivity
 # ------------------------------------------------------------
+body_status <- run_tad_models("body")
 
-body_status <- bind_rows(
-  lapply(
-    primary_markers,
-    extract_tad,
-    add_body_status = TRUE
-  )
-) %>%
-  mutate(q_value = p.adjust(P_value, method = "BH"))
-
-# Validate the body-status sensitivity estimates reported in Supplementary Table S6D.
-reference_body_status_ratio <- c(
-  CD4 = 0.76640799,
-  CD8 = 0.77958052,
-  FOXP3 = 0.80411894
-)
-
-observed_body_status_ratio <- setNames(
-  body_status$Ratio,
-  body_status$Marker
-)
-
-stopifnot(
-  all(
-    abs(
-      observed_body_status_ratio[names(reference_body_status_ratio)] -
-        reference_body_status_ratio
-    ) < 1e-6
-  )
+# Reference values from the original analysis
+check_reference(
+  body_status,
+  c(CD4 = 0.76640799, CD8 = 0.77958052, FOXP3 = 0.80411894),
+  tol = 1e-6,
+  label = "Table S7D body-status model"
 )
 
 write.csv(
   body_status,
   file.path(
     out_dir,
-    "Supplementary_Table_S6D_BMI_SMI_albumin_ECOG_adjusted.csv"
+    "Supplementary_Table_S7D_BMI_SMI_albumin_ECOG_adjusted.csv"
   ),
   row.names = FALSE
 )
 
-cat("\nBMI/SMI/albumin/ECOG-PS-adjusted immune models:\n")
-print(body_status)
-
-# Reference estimates reported in the manuscript:
-# CD4   0.77 (0.60-0.98), P=0.035, q=0.068
-# CD8   0.78 (0.61-1.00), P=0.045, q=0.068
-# FOXP3 0.80 (0.63-1.04), P=0.090, q=0.090
-
 # ------------------------------------------------------------
-# Four diabetes phenotypes
-# Supplementary Table S5C1
-#
-# B1: descriptive median/IQR + Kruskal-Wallis
-# B2: adjusted four-category HC3 models
-#
-# No diabetes is the reference category.
-#
-# The adjusted four-category analyses are supporting analyses
-# and are not included in the BH correction applied to the
-# main marker-specific TAD/non-TAD analyses.
+# Supplementary Table S6C: four diabetes phenotypes
 # ------------------------------------------------------------
-
-
-# ============================================================
-# B1. Descriptive T-cell densities
-# ============================================================
-
+# Descriptive statistics and Kruskal-Wallis tests
 fourcat_descriptive <- bind_rows(
-  lapply(primary_markers, function(marker) {
+  lapply(markers, function(marker) {
+    values <- split(dat[[marker]], dat$dm_group)
 
-    kt <- kruskal.test(dat[[marker]] ~ dat$dm_group)
-
-    med <- tapply(
-      dat[[marker]],
-      dat$dm_group,
-      median,
-      na.rm = TRUE
-    )
-
-    q1 <- tapply(
-      dat[[marker]],
-      dat$dm_group,
-      function(x) {
-        quantile(
-          x,
-          0.25,
-          na.rm = TRUE,
-          names = FALSE
-        )
-      }
-    )
-
-    q3 <- tapply(
-      dat[[marker]],
-      dat$dm_group,
-      function(x) {
-        quantile(
-          x,
-          0.75,
-          na.rm = TRUE,
-          names = FALSE
-        )
-      }
-    )
-
-    data.frame(
+    out <- data.frame(
       Marker = marker,
-
-      No_DM_median = med["No diabetes"],
-      No_DM_Q1 = q1["No diabetes"],
-      No_DM_Q3 = q3["No diabetes"],
-
-      Stable_DM_median = med["Long-standing stable"],
-      Stable_DM_Q1 = q1["Long-standing stable"],
-      Stable_DM_Q3 = q3["Long-standing stable"],
-
-      New_onset_median = med["New-onset"],
-      New_onset_Q1 = q1["New-onset"],
-      New_onset_Q3 = q3["New-onset"],
-
-      Worsening_median = med["Worsening"],
-      Worsening_Q1 = q1["Worsening"],
-      Worsening_Q3 = q3["Worsening"],
-
-      Kruskal_Wallis_P = kt$p.value,
-
-      stringsAsFactors = FALSE
+      Kruskal_Wallis_P = kruskal.test(
+        dat[[marker]] ~ dat$dm_group
+      )$p.value
     )
+
+    for (nm in names(values)) {
+      prefix <- make.names(nm)
+      x <- values[[nm]]
+      out[[paste0(prefix, "_n")]] <- length(x)
+      out[[paste0(prefix, "_median")]] <- median(x)
+      out[[paste0(prefix, "_Q1")]] <- unname(
+        quantile(x, 0.25)
+      )
+      out[[paste0(prefix, "_Q3")]] <- unname(
+        quantile(x, 0.75)
+      )
+    }
+    out
   })
 )
 
@@ -482,327 +356,115 @@ write.csv(
   fourcat_descriptive,
   file.path(
     out_dir,
-    "Supplementary_Table_S5C1_descriptive_four_diabetes_phenotypes.csv"
+    "Supplementary_Table_S6C_descriptive_four_diabetes_phenotypes.csv"
   ),
   row.names = FALSE
 )
 
-cat("\nFour-category descriptive analyses:\n")
-print(fourcat_descriptive)
-
-cat(
-  paste0(
-    "Reference values: ",
-    "Kruskal-Wallis P: ",
-    "CD4 ~0.144; ",
-    "CD8 ~0.147; ",
-    "FOXP3 ~0.102.\n"
-  )
-)
-
-
-# ============================================================
-# B2. Adjusted four-category analyses
-#
-# Same covariate adjustment as the main T-cell models:
-#
-# log(marker) ~
-#   diabetes phenotype
-#   + age
-#   + pathologic stage
-#   + log2(CA19-9)
-#   + continuous NLR
-#   + neoadjuvant chemotherapy
-#
-# HC3 heteroscedasticity-robust covariance.
-# ============================================================
-
-fit_fourcat_hc3 <- function(marker) {
-
-  f <- as.formula(
-    paste0(
-      "log(", marker, ") ~ ",
-      "dm_group + age + stage + log2_CA199 + NLR_raw + neoadj"
-    )
-  )
-
-  fit <- lm(f, data = dat)
-
-  V <- vcovHC(
-    fit,
-    type = "HC3"
-  )
-
+# Adjusted model: robust contrasts vs no diabetes and
+# HC3 Wald omnibus test (3 df)
+fit_fourcat <- function(marker) {
+  fit <- fit_model(marker, "fourcat")
+  V <- vcovHC(fit, type = "HC3")
   b <- coef(fit)
-  se <- sqrt(diag(V))
 
-  phenotype_terms <- grep(
-    "^dm_group",
-    names(b),
-    value = TRUE
-  )
-
-  if (length(phenotype_terms) != 3) {
-    stop(
-      "Expected three diabetes-phenotype coefficients for ",
-      marker,
-      "; found ",
-      length(phenotype_terms)
-    )
+  terms <- grep("^dm_group", names(b), value = TRUE)
+  if (length(terms) != 3) {
+    stop("Expected 3 phenotype coefficients for ", marker)
   }
 
-  beta <- b[phenotype_terms]
-  robust_se <- se[phenotype_terms]
+  beta <- b[terms]
+  se <- sqrt(diag(V))[terms]
+  z <- beta / se
 
-  z <- beta / robust_se
-  p <- 2 * pnorm(-abs(z))
-
-  zcrit <- qnorm(0.975)
-
-  contrast_results <- data.frame(
+  tab <- data.frame(
     Marker = marker,
-    Contrast = sub(
-      "^dm_group",
-      "",
-      phenotype_terms
-    ),
-    Adjusted_ratio = exp(beta),
-    Lower95 = exp(
-      beta - zcrit * robust_se
-    ),
-    Upper95 = exp(
-      beta + zcrit * robust_se
-    ),
-    P_value = p,
+    Category = sub("^dm_group", "", terms),
+    Reference = levels(dat$dm_group)[1],
+    Adjusted_ratio = unname(exp(beta)),
+    Lower95 = unname(exp(beta - zcrit * se)),
+    Upper95 = unname(exp(beta + zcrit * se)),
+    P_value = unname(2 * pnorm(-abs(z))),
     stringsAsFactors = FALSE
   )
 
-  # HC3 robust omnibus Wald test:
-  # H0: all three diabetes-phenotype coefficients = 0
-  V_sub <- V[
-    phenotype_terms,
-    phenotype_terms,
-    drop = FALSE
-  ]
-
-  W <- as.numeric(
-    t(beta) %*%
-      solve(V_sub) %*%
-      beta
-  )
-
-  omnibus_p <- pchisq(
-    W,
-    df = length(beta),
+  Vs <- V[terms, terms, drop = FALSE]
+  W <- as.numeric(t(beta) %*% solve(Vs) %*% beta)
+  tab$Omnibus_P <- pchisq(
+    W, df = length(beta),
     lower.tail = FALSE
   )
-
-  list(
-    fit = fit,
-    covariance = V,
-    contrasts = contrast_results,
-    omnibus_P = omnibus_p
-  )
+  tab
 }
-
-
-fourcat_adjusted_list <- lapply(
-  primary_markers,
-  fit_fourcat_hc3
-)
 
 fourcat_adjusted <- bind_rows(
-  lapply(
-    fourcat_adjusted_list,
-    function(x) x$contrasts
-  )
+  lapply(markers, fit_fourcat)
 )
-
-fourcat_omnibus <- data.frame(
-  Marker = primary_markers,
-  Omnibus_P = sapply(
-    fourcat_adjusted_list,
-    function(x) x$omnibus_P
-  ),
-  stringsAsFactors = FALSE
-)
-
-
-# ------------------------------------------------------------
-# Wide output matching Supplementary Table S5C2
-# ------------------------------------------------------------
-
-extract_fourcat_row <- function(marker) {
-
-  z <- fourcat_adjusted %>%
-    filter(Marker == marker)
-
-  get_contrast <- function(name) {
-
-    x <- z %>%
-      filter(Contrast == name)
-
-    if (nrow(x) != 1) {
-      stop(
-        "Could not identify contrast '",
-        name,
-        "' for ",
-        marker
-      )
-    }
-
-    x
-  }
-
-  stable <- get_contrast(
-    "Long-standing stable"
-  )
-
-  new_onset <- get_contrast(
-    "New-onset"
-  )
-
-  worsening <- get_contrast(
-    "Worsening"
-  )
-
-  omnibus <- fourcat_omnibus %>%
-    filter(Marker == marker)
-
-  data.frame(
-    Marker = marker,
-
-    Stable_ratio = stable$Adjusted_ratio,
-    Stable_Lower95 = stable$Lower95,
-    Stable_Upper95 = stable$Upper95,
-    Stable_P = stable$P_value,
-
-    New_onset_ratio = new_onset$Adjusted_ratio,
-    New_onset_Lower95 = new_onset$Lower95,
-    New_onset_Upper95 = new_onset$Upper95,
-    New_onset_P = new_onset$P_value,
-
-    Worsening_ratio = worsening$Adjusted_ratio,
-    Worsening_Lower95 = worsening$Lower95,
-    Worsening_Upper95 = worsening$Upper95,
-    Worsening_P = worsening$P_value,
-
-    Omnibus_P = omnibus$Omnibus_P,
-
-    stringsAsFactors = FALSE
-  )
-}
-
-
-fourcat_adjusted_wide <- bind_rows(
-  lapply(
-    primary_markers,
-    extract_fourcat_row
-  )
-)
-
 
 write.csv(
   fourcat_adjusted,
   file.path(
     out_dir,
-    "Supplementary_Table_S5C2_adjusted_four_diabetes_phenotypes_long.csv"
+    "Supplementary_Table_S6C_adjusted_four_diabetes_phenotypes_long.csv"
   ),
   row.names = FALSE
 )
 
-write.csv(
-  fourcat_adjusted_wide,
-  file.path(
-    out_dir,
-    "Supplementary_Table_S5C2_adjusted_four_diabetes_phenotypes.csv"
-  ),
-  row.names = FALSE
-)
-
-
-cat("\nAdjusted four-category T-cell analyses:\n")
-print(fourcat_adjusted_wide)
-
-cat(
-  paste0(
-    "\nReference values:\n",
-    "CD4: stable 1.08, new-onset 0.76, worsening 0.75; ",
-    "omnibus P ~0.127\n",
-    "CD8: stable 0.97, new-onset 0.76, worsening 0.82; ",
-    "omnibus P ~0.197\n",
-    "FOXP3: stable 0.86, new-onset 0.80, worsening 0.75; ",
-    "omnibus P ~0.234\n"
-  )
-)
-
-cat(
-  paste0(
-    "\nSupporting four-category analyses are not included ",
-    "in the Benjamini-Hochberg correction applied to the ",
-    "main marker-specific TAD/non-TAD analyses.\n"
-  )
-)
-
 # ------------------------------------------------------------
-# TAD-by-stage interaction in immune-density models:
-# HC3 robust WALD test for the interaction coefficient
-# Supplementary Table S5B
+# Supplementary Table S6B (T-cell rows): TAD-by-stage
+# interactions. Ratio = ratio of TAD effects
+# (stage >=IIb vs <=IIa)
 # ------------------------------------------------------------
-
 interaction_results <- bind_rows(
-  lapply(primary_markers, function(marker) {
+  lapply(markers, function(marker) {
+    fit <- fit_model(marker, "interaction")
+    tab <- hc3_table(fit)
 
-    z <- fit_marker_hc3(marker, interaction = TRUE)
+    x <- tab[
+      grepl("TAD:stage|stage:TAD", tab$term),
+      ,
+      drop = FALSE
+    ]
 
-    int_rows <- z$table %>%
-      filter(grepl("TAD:stage|stage:TAD", term))
-
-    if (nrow(int_rows) != 1) {
-      stop("Could not identify TAD-by-stage term for ", marker)
+    if (nrow(x) != 1) {
+      stop("Interaction term not found: ", marker)
     }
 
     data.frame(
       Marker = marker,
-      Test = "HC3 robust Wald test for TAD-by-stage interaction term",
-      Interaction_term = int_rows$term,
-      Wald_z = int_rows$z,
-      P_value = int_rows$p,
-      stringsAsFactors = FALSE
+      Interaction_term = x$term,
+      Ratio = exp(x$estimate),
+      Lower95 = exp(x$estimate - zcrit * x$robust_se),
+      Upper95 = exp(x$estimate + zcrit * x$robust_se),
+      Wald_z = x$z,
+      P_value = x$p,
+      Test = "HC3 robust Wald"
     )
   })
 )
 
 write.csv(
   interaction_results,
-  file.path(out_dir, "Supplementary_Table_S5B_immune_stage_interactions.csv"),
+  file.path(
+    out_dir,
+    "Supplementary_Table_S6B_TAD_by_stage_interaction_Tcell.csv"
+  ),
   row.names = FALSE
 )
 
-cat("\nImmune TAD-by-stage interaction (HC3 Wald):\n")
-print(interaction_results)
-cat("Reference interaction P values: CD4 ~0.168; CD8 ~0.384; FOXP3 ~0.687.\n")
-
-cat("\n============================================\n")
-cat("T-CELL MODEL SUMMARY\n")
-cat("============================================\n")
-cat(
-  "n =", nrow(dat),
-  "| non-TAD =", sum(dat$TAD == 0),
-  "| TAD =", sum(dat$TAD == 1), "\n"
-)
-print(primary[, c(
-  "Marker", "Ratio", "Lower95", "Upper95", "P_value", "q_value",
-  "Bootstrap_Lower95", "Bootstrap_Upper95"
-)])
-
+cat("\nPrimary adjusted T-cell ratios:\n")
+print(primary)
+cat("\nHbA1c sensitivity:\n")
+print(hba1c)
 cat("\nBody-status sensitivity:\n")
-print(body_status[, c(
-  "Marker", "Ratio", "Lower95", "Upper95", "P_value", "q_value"
-)])
-
-cat("============================================\n")
+print(body_status)
+cat("\nFour-category analyses:\n")
+print(fourcat_adjusted)
+cat("\nStage-interaction tests:\n")
+print(interaction_results)
 
 sink(file.path(out_dir, "sessionInfo_tcell_models.txt"))
-sessionInfo()
+print(sessionInfo())
 sink()
+
+cat("\nT-cell analyses completed.\n")
